@@ -1,5 +1,5 @@
 import 'package:flutter/foundation.dart';
-import 'package:window_manager/window_manager.dart';
+import '../../core/services/desktop_platform_service.dart';
 import '../library/library_models.dart';
 import '../player/playback_session.dart';
 
@@ -52,27 +52,30 @@ class ShellController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> startWindowDragging() =>
+      DesktopPlatformService.startWindowDragging();
+
   Future<void> syncMaximizedState() async {
-    _isMaximized = await windowManager.isMaximized();
+    _isMaximized = await DesktopPlatformService.isWindowMaximized();
     notifyListeners();
   }
 
   Future<void> minimizeWindow() async {
-    await windowManager.minimize();
+    await DesktopPlatformService.minimizeWindow();
   }
 
   Future<void> toggleMaximizeWindow() async {
-    final maximized = await windowManager.isMaximized();
+    final maximized = await DesktopPlatformService.isWindowMaximized();
     if (maximized) {
-      await windowManager.unmaximize();
+      await DesktopPlatformService.unmaximizeWindow();
     } else {
-      await windowManager.maximize();
+      await DesktopPlatformService.maximizeWindow();
     }
     _isMaximized = !maximized;
     notifyListeners();
   }
 
   Future<void> closeWindow() async {
-    await windowManager.close();
+    await DesktopPlatformService.closeWindow();
   }
 }

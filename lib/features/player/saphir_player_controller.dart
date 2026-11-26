@@ -1,38 +1,47 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
-import 'package:window_manager/window_manager.dart';
 import '../../core/constants/app_spacing.dart';
 import '../../core/constants/app_strings.dart';
+import '../../core/services/desktop_platform_service.dart';
+import '../../core/services/local_file_service.dart';
 import '../../core/storage/database_service.dart';
 import '../../core/storage/progress_sync_service.dart';
+import 'playback_persistence_service.dart';
 import 'playback_session.dart';
 
 class SaphirPlayerController extends ChangeNotifier {
   SaphirPlayerController(
-    this._databaseService,
+    DatabaseService databaseService,
     this._syncService,
-    this._getNasPath,
-  ) {
-    _player = Player(
-      configuration: const PlayerConfiguration(
-        title: AppStrings.appTitle,
-      ),
-    );
-    _videoController = VideoController(
-      _player,
-      configuration: const VideoControllerConfiguration(
-        enableHardwareAcceleration: true,
-      ),
-    );
+    this._getNasPath, {
+    Player? player,
+    VideoController? videoController,
+    Future<void> Function(bool fullscreen)? onSetFullScreen,
+  })  : _persistence = PlaybackPersistenceService(databaseService),
+        _onSetFullScreen =
+            onSetFullScreen ?? DesktopPlatformService.setFullScreen {
+    _player = player ??
+        Player(
+          configuration: const PlayerConfiguration(
+            title: AppStrings.appTitle,
+          ),
+        );
+    _videoController = videoController ??
+        VideoController(
+          _player,
+          configuration: const VideoControllerConfiguration(
+            enableHardwareAcceleration: true,
+          ),
+        );
     _bindStreams();
   }
 
-  final DatabaseService _databaseService;
+  final PlaybackPersistenceService _persistence;
   final ProgressSyncService _syncService;
   final String Function() _getNasPath;
+  final Future<void> Function(bool fullscreen) _onSetFullScreen;
 
   late final Player _player;
   late final VideoController _videoController;
@@ -40,6 +49,9 @@ class SaphirPlayerController extends ChangeNotifier {
   final List<StreamSubscription<dynamic>> _subscriptions = [];
   Timer? _hudHideTimer;
   Timer? _progressTimer;
+
+  bool _isDisposed = false;
+  int _openRequestId = 0;
 
   PlaybackSession? _session;
   int _currentIndex = 0;
@@ -58,38 +70,22 @@ class SaphirPlayerController extends ChangeNotifier {
   SubtitleTrack _activeSubtitleTrack = SubtitleTrack.auto();
   String? _errorMessage;
 
-  DateTime? _playSegmentStartedAt;
-  int? _activeHistoryRowId;
-  String? _activeHistoryMediaKey;
-  String? _activeHistoryDayKey;
-
   VideoController get videoController => _videoController;
   PlaybackSession? get session => _session;
+
   PlaybackQueueEntry? get currentEntry {
     final activeSession = _session;
-    if (activeSession == null || activeSession.queue.isEmpty) {
-      return null;
-    }
+    if (activeSession == null || activeSession.queue.isEmpty) return null;
     return activeSession
         .queue[_currentIndex.clamp(0, activeSession.queue.length - 1)];
   }
 
-  PlaybackQueueEntry? get nextEntry {
-    final activeSession = _session;
-    if (activeSession == null || !hasNextEpisode) {
-      return null;
-    }
-    return activeSession.queue[_currentIndex + 1];
-  }
+  PlaybackQueueEntry? get nextEntry =>
+      hasNextEpisode ? _session!.queue[_currentIndex + 1] : null;
 
   bool get hasPreviousEpisode => _currentIndex > 0;
-  bool get hasNextEpisode {
-    final activeSession = _session;
-    if (activeSession == null) {
-      return false;
-    }
-    return _currentIndex + 1 < activeSession.queue.length;
-  }
+  bool get hasNextEpisode =>
+      _session != null && _currentIndex + 1 < _session!.queue.length;
 
   bool get isPlaying => _isPlaying;
   bool get isFullscreen => _isFullscreen;
@@ -124,7 +120,7 @@ class SaphirPlayerController extends ChangeNotifier {
 
   void dismissAutoNext() {
     _autoNextDismissed = true;
-    notifyListeners();
+    _safeNotify();
   }
 
   void _bindStreams() {
@@ -132,68 +128,57 @@ class SaphirPlayerController extends ChangeNotifier {
       _player.stream.playing.listen((playing) {
         _isPlaying = playing;
         if (!playing) {
-          _recordWatchHistorySlice();
+          _persistence.recordWatchHistorySlice(
+            currentEntry,
+            isPlaying: false,
+          );
           _stopProgressTimer();
           _persistProgress(syncRemote: true);
           showHud(keepVisibleWhilePaused: true);
         } else {
-          _playSegmentStartedAt ??= DateTime.now();
+          _persistence.startPlaySegmentIfNeeded();
           _startProgressTimer();
           registerUserActivity();
         }
-        notifyListeners();
+        _safeNotify();
       }),
     );
 
-    _subscriptions.add(
-      _player.stream.position.listen((pos) {
-        _position = pos;
-        notifyListeners();
-      }),
-    );
-
-    _subscriptions.add(
-      _player.stream.duration.listen((dur) {
-        _duration = dur;
-        notifyListeners();
-      }),
-    );
-
-    _subscriptions.add(
-      _player.stream.volume.listen((vol) {
-        _volume = vol;
-        notifyListeners();
-      }),
-    );
-
-    _subscriptions.add(
-      _player.stream.tracks.listen((tracks) {
-        _audioTracks = tracks.audio;
-        _subtitleTracks = tracks.subtitle;
-        _applySavedSeriesPreferences();
-        notifyListeners();
-      }),
-    );
-
-    _subscriptions.add(
-      _player.stream.track.listen((track) {
-        _activeAudioTrack = track.audio;
-        _activeSubtitleTrack = track.subtitle;
-        _saveSeriesPreferences(track.audio, track.subtitle);
-        notifyListeners();
-      }),
-    );
-
-    _subscriptions.add(
-      _player.stream.completed.listen((completed) async {
-        if (completed) {
-          _persistProgress(forceCompleted: true, syncRemote: true);
-          if (hasNextEpisode && !_autoNextDismissed) {
-            await playNextEpisode();
-          }
-        }
-      }),
-    );
+    _subscriptions.add(_player.stream.position.listen((pos) {
+      _position = pos;
+      _safeNotify();
+    }));
+    _subscriptions.add(_player.stream.duration.listen((dur) {
+      _duration = dur;
+      _safeNotify();
+    }));
+    _subscriptions.add(_player.stream.volume.listen((vol) {
+      _volume = vol;
+      _safeNotify();
+    }));
+    _subscriptions.add(_player.stream.tracks.listen((tracks) {
+      _audioTracks = tracks.audio;
+      _subtitleTracks = tracks.subtitle;
+      _applySavedSeriesPreferences();
+      _safeNotify();
+    }));
+    _subscriptions.add(_player.stream.track.listen((track) {
+      _activeAudioTrack = track.audio;
+      _activeSubtitleTrack = track.subtitle;
+      _saveSeriesPreferences(track.audio, track.subtitle);
+      _safeNotify();
+    }));
+    _subscriptions.add(_player.stream.completed.listen((completed) async {
+      if (_isDisposed || !completed) return;
+      _persistProgress(forceCompleted: true, syncRemote: true);
+      if (hasNextEpisode && !_autoNextDismissed) await playNextEpisode();
+    }));
+    _subscriptions.add(_player.stream.error.listen((error) {
+      if (_isDisposed || error.trim().isEmpty) return;
+      _stopProgressTimer();
+      _errorMessage = AppStrings.playerPlaybackError;
+      _safeNotify();
+    }));
   }
 
   void _startProgressTimer() {
@@ -214,17 +199,13 @@ class SaphirPlayerController extends ChangeNotifier {
     if (seriesId == null) {
       return;
     }
-    final db = _databaseService.instance;
-    final rows = db.select(
-      'SELECT audio_track, subtitle_track FROM series_preferences WHERE series_id = ? LIMIT 1;',
-      [seriesId],
-    );
-    if (rows.isEmpty) {
+    final prefs = _persistence.loadSeriesPreferences(seriesId);
+    if (prefs == null) {
       return;
     }
 
-    final savedAudioId = rows.first['audio_track'] as String?;
-    final savedSubtitleId = rows.first['subtitle_track'] as String?;
+    final savedAudioId = prefs.audioTrack;
+    final savedSubtitleId = prefs.subtitleTrack;
 
     if (savedAudioId != null && savedAudioId.isNotEmpty) {
       for (final track in _audioTracks) {
@@ -254,26 +235,17 @@ class SaphirPlayerController extends ChangeNotifier {
 
   void _saveSeriesPreferences(AudioTrack audio, SubtitleTrack subtitle) {
     final seriesId = currentEntry?.seriesId;
-    if (seriesId == null) {
+    if (seriesId == null ||
+        (audio.id == 'auto' && subtitle.id == 'auto')) {
       return;
     }
-    if (audio.id == 'auto' && subtitle.id == 'auto') {
-      return;
-    }
-    final db = _databaseService.instance;
-    db.execute(
-      '''
-      INSERT INTO series_preferences (series_id, audio_track, subtitle_track)
-      VALUES (?, ?, ?)
-      ON CONFLICT(series_id) DO UPDATE SET
-        audio_track = excluded.audio_track,
-        subtitle_track = excluded.subtitle_track;
-      ''',
-      [seriesId, audio.id, subtitle.id],
-    );
+    _persistence.saveSeriesPreferences(seriesId, audio.id, subtitle.id);
   }
 
   Future<void> startSession(PlaybackSession newSession) async {
+    if (newSession.queue.isEmpty) {
+      return;
+    }
     _session = newSession;
     _currentIndex =
         newSession.initialIndex.clamp(0, newSession.queue.length - 1);
@@ -282,37 +254,59 @@ class SaphirPlayerController extends ChangeNotifier {
 
   Future<void> _openEntryAtIndex(int index) async {
     final activeSession = _session;
-    if (activeSession == null ||
+    if (_isDisposed ||
+        activeSession == null ||
         index < 0 ||
         index >= activeSession.queue.length) {
       return;
     }
 
+    final requestId = ++_openRequestId;
     _currentIndex = index;
     _autoNextDismissed = false;
     _errorMessage = null;
     _position = Duration.zero;
     _duration = Duration.zero;
-    _playSegmentStartedAt = null;
-    _activeHistoryRowId = null;
-    _activeHistoryMediaKey = null;
-    _activeHistoryDayKey = null;
-    notifyListeners();
+    _persistence.resetHistoryTracking();
+    _safeNotify();
 
     final entry = activeSession.queue[_currentIndex];
-    final file = File(entry.filePath);
-    if (!await file.exists()) {
+    final fileStatus =
+        await LocalFileService.checkPlayableFile(entry.filePath);
+    if (_isDisposed || requestId != _openRequestId) {
+      return;
+    }
+    if (fileStatus == PlayableFileStatus.missing) {
       _errorMessage = AppStrings.playerFileMissingError;
-      notifyListeners();
+      _safeNotify();
+      return;
+    }
+    if (fileStatus == PlayableFileStatus.empty) {
+      _errorMessage = AppStrings.playerEmptyFileError;
+      _safeNotify();
       return;
     }
 
-    await _player.open(Media(entry.filePath), play: true);
-
-    if (entry.startPositionMs > 0) {
-      await _player.seek(Duration(milliseconds: entry.startPositionMs));
+    try {
+      await _player.open(Media(entry.filePath), play: true);
+      if (_isDisposed || requestId != _openRequestId) {
+        return;
+      }
+      if (entry.startPositionMs > 0) {
+        await _player.seek(Duration(milliseconds: entry.startPositionMs));
+      }
+    } catch (_) {
+      if (_isDisposed || requestId != _openRequestId) {
+        return;
+      }
+      _errorMessage = AppStrings.playerPlaybackError;
+      _safeNotify();
+      return;
     }
 
+    if (_isDisposed || requestId != _openRequestId) {
+      return;
+    }
     _startProgressTimer();
     registerUserActivity();
   }
@@ -326,8 +320,10 @@ class SaphirPlayerController extends ChangeNotifier {
     registerUserActivity();
     final targetMs = (_position.inMilliseconds +
             (deltaSeconds * AppSpacing.millisecondsPerSecond))
-        .clamp(0,
-            _duration.inMilliseconds > 0 ? _duration.inMilliseconds : 1 << 30);
+        .clamp(
+      0,
+      _duration.inMilliseconds > 0 ? _duration.inMilliseconds : 1 << 30,
+    );
     await _player.seek(Duration(milliseconds: targetMs));
   }
 
@@ -364,7 +360,7 @@ class SaphirPlayerController extends ChangeNotifier {
     registerUserActivity();
     _playbackSpeed = speed;
     await _player.setRate(speed);
-    notifyListeners();
+    _safeNotify();
   }
 
   Future<void> playNextEpisode() async {
@@ -398,8 +394,8 @@ class SaphirPlayerController extends ChangeNotifier {
   Future<void> toggleFullscreen() async {
     registerUserActivity();
     _isFullscreen = !_isFullscreen;
-    await windowManager.setFullScreen(_isFullscreen);
-    notifyListeners();
+    await _onSetFullScreen(_isFullscreen);
+    _safeNotify();
   }
 
   void registerUserActivity() {
@@ -409,7 +405,7 @@ class SaphirPlayerController extends ChangeNotifier {
   void showHud({bool keepVisibleWhilePaused = false}) {
     if (!_isHudVisible) {
       _isHudVisible = true;
-      notifyListeners();
+      _safeNotify();
     }
     _hudHideTimer?.cancel();
     if (keepVisibleWhilePaused) {
@@ -418,157 +414,68 @@ class SaphirPlayerController extends ChangeNotifier {
     _hudHideTimer = Timer(
       const Duration(seconds: AppSpacing.hudAutoHideSeconds),
       () {
-        if (_isPlaying && _isHudVisible) {
+        if (!_isDisposed && _isPlaying && _isHudVisible) {
           _isHudVisible = false;
-          notifyListeners();
+          _safeNotify();
         }
       },
     );
   }
 
   Future<void> stopAndClose() async {
+    _openRequestId++;
     _hudHideTimer?.cancel();
     _stopProgressTimer();
-    _recordWatchHistorySlice();
+    _persistence.recordWatchHistorySlice(currentEntry, isPlaying: false);
     _persistProgress(syncRemote: true);
     await _player.stop();
     if (_isFullscreen) {
       _isFullscreen = false;
-      await windowManager.setFullScreen(false);
+      await _onSetFullScreen(false);
     }
-    _playSegmentStartedAt = null;
-    _activeHistoryRowId = null;
-    _activeHistoryMediaKey = null;
-    _activeHistoryDayKey = null;
+    _persistence.resetHistoryTracking();
     _session = null;
-    notifyListeners();
-  }
-
-  void _recordWatchHistorySlice() {
-    final startedAt = _playSegmentStartedAt;
-    final entry = currentEntry;
-    if (startedAt == null || entry == null) {
-      return;
-    }
-
-    final now = DateTime.now();
-    _playSegmentStartedAt = _isPlaying ? now : null;
-
-    var elapsedMs = now.difference(startedAt).inMilliseconds;
-    if (elapsedMs < AppSpacing.millisecondsPerSecond) {
-      return;
-    }
-    const maxSliceMs = 60 * AppSpacing.millisecondsPerSecond;
-    if (elapsedMs > maxSliceMs) {
-      elapsedMs = maxSliceMs;
-    }
-
-    final dayKey =
-        '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
-    final nowMs = now.millisecondsSinceEpoch;
-    final db = _databaseService.instance;
-
-    if (_activeHistoryRowId != null &&
-        _activeHistoryMediaKey == entry.mediaKey &&
-        _activeHistoryDayKey == dayKey) {
-      db.execute(
-        'UPDATE watch_history SET watched_ms = watched_ms + ?, ended_at = ? WHERE id = ?;',
-        [elapsedMs, nowMs, _activeHistoryRowId],
-      );
-      return;
-    }
-
-    db.execute(
-      '''
-      INSERT INTO watch_history (
-        media_key, media_type, title, series_id, watched_ms, started_at, ended_at, day_key, weekday, source_device
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-      ''',
-      [
-        entry.mediaKey,
-        entry.mediaType,
-        entry.title,
-        entry.seriesId,
-        elapsedMs,
-        startedAt.millisecondsSinceEpoch,
-        nowMs,
-        dayKey,
-        now.weekday,
-        Platform.localHostname,
-      ],
-    );
-    _activeHistoryRowId = db.lastInsertRowId;
-    _activeHistoryMediaKey = entry.mediaKey;
-    _activeHistoryDayKey = dayKey;
+    _safeNotify();
   }
 
   void _persistProgress({
     bool forceCompleted = false,
     bool syncRemote = false,
   }) {
-    if (_isPlaying) {
-      _recordWatchHistorySlice();
-    }
     final entry = currentEntry;
     if (entry == null) {
       return;
     }
-    final durMs = _duration.inMilliseconds;
-    final posMs = _position.inMilliseconds;
-    if (durMs <= 0 && posMs <= 0 && !forceCompleted) {
-      return;
+    if (_isPlaying) {
+      _persistence.recordWatchHistorySlice(entry, isPlaying: true);
     }
-
-    final db = _databaseService.instance;
-    final nowMs = DateTime.now().millisecondsSinceEpoch;
-    final ratioReached =
-        durMs > 0 && (posMs / durMs) >= AppSpacing.completedThresholdRatio;
-    final completed = (forceCompleted || ratioReached) ? 1 : 0;
-
-    db.execute(
-      '''
-      INSERT INTO watch_progress (
-        media_key, media_type, position_ms, duration_ms, completed, updated_at, source_device
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(media_key) DO UPDATE SET
-        position_ms = excluded.position_ms,
-        duration_ms = excluded.duration_ms,
-        completed = excluded.completed,
-        updated_at = excluded.updated_at,
-        source_device = excluded.source_device;
-      ''',
-      [
-        entry.mediaKey,
-        entry.mediaType,
-        completed == 1 ? 0 : posMs,
-        durMs,
-        completed,
-        nowMs,
-        Platform.localHostname,
-      ],
+    _persistence.persistProgress(
+      entry: entry,
+      positionMs: _position.inMilliseconds,
+      durationMs: _duration.inMilliseconds,
+      forceCompleted: forceCompleted,
     );
-
-    if (entry.seriesId != null) {
-      db.execute(
-        'UPDATE series SET last_watched_at = ? WHERE id = ?;',
-        [nowMs, entry.seriesId],
-      );
-    }
-
     if (syncRemote) {
       unawaited(_syncService.syncWithStorage(_getNasPath()));
     }
   }
 
+  void _safeNotify() {
+    if (!_isDisposed) {
+      notifyListeners();
+    }
+  }
+
   @override
   void dispose() {
+    _isDisposed = true;
+    _openRequestId++;
     _hudHideTimer?.cancel();
     _stopProgressTimer();
     for (final sub in _subscriptions) {
       sub.cancel();
     }
+    _subscriptions.clear();
     _player.dispose();
     super.dispose();
   }

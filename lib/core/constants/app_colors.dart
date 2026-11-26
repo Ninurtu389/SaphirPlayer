@@ -24,7 +24,6 @@ class AppColors {
 
   static const Color textPrimary = Color(0xFFF2F6FC);
   static const Color textSecondary = Color(0xFFA7B3C7);
-  static const Color textMuted = Color(0xFF6A778E);
 
   static const Color successGreen = Color(0xFF25B869);
   static const Color progressTrack = Color(0xFF28354D);
@@ -87,7 +86,7 @@ class AppColors {
     ],
   );
 
-  static const List<List<Color>> coverFallbackGradients = [
+  static const List<List<Color>> _coverFallbackGradients = [
     [Color(0xFF0E2347), Color(0xFF091326)],
     [Color(0xFF1B1B42), Color(0xFF0D0E24)],
     [Color(0xFF3E1222), Color(0xFF1D0911)],
@@ -98,7 +97,7 @@ class AppColors {
 
   static List<Color> coverGradientForTitle(String title) {
     final hash = title.codeUnits.fold<int>(0, (acc, unit) => acc * 31 + unit);
-    final index = hash.abs() % coverFallbackGradients.length;
-    return coverFallbackGradients[index];
+    final index = hash.abs() % _coverFallbackGradients.length;
+    return _coverFallbackGradients[index];
   }
 }

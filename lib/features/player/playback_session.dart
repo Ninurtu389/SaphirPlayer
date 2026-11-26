@@ -1,3 +1,6 @@
+import '../../core/utils/formatters.dart';
+import '../library/library_models.dart';
+
 class PlaybackQueueEntry {
   const PlaybackQueueEntry({
     required this.mediaKey,
@@ -26,4 +29,30 @@ class PlaybackSession {
 
   final List<PlaybackQueueEntry> queue;
   final int initialIndex;
+
+  static PlaybackSession fromEpisodes({
+    required String seriesTitle,
+    required List<EpisodeEntry> episodes,
+    required int startIndex,
+  }) {
+    final queue = episodes
+        .map(
+          (ep) => PlaybackQueueEntry(
+            mediaKey: Formatters.episodeMediaKey(ep.id),
+            mediaType: 'episode',
+            title: seriesTitle,
+            subtitle: Formatters.formatEpisodeSubtitle(
+              ep.seasonNumber,
+              ep.episodeNumber,
+              ep.title,
+            ),
+            filePath: ep.filePath,
+            seriesId: ep.seriesId,
+            startPositionMs: ep.isCompleted ? 0 : ep.positionMs,
+          ),
+        )
+        .toList();
+
+    return PlaybackSession(queue: queue, initialIndex: startIndex);
+  }
 }

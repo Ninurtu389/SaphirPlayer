@@ -70,6 +70,7 @@ class ThumbnailGeneratorService {
     required int durationMs,
     required bool isPlaybackActive,
     ThumbnailMediaKitSession? mediaKitSession,
+    bool allowMediaKitFallback = true,
   }) async {
     return generateThumbnail(
       videoFilePath: videoFilePath,
@@ -77,6 +78,7 @@ class ThumbnailGeneratorService {
       isPlaybackActive: isPlaybackActive,
       prefix: 'ep',
       mediaKitSession: mediaKitSession,
+      allowMediaKitFallback: allowMediaKitFallback,
     );
   }
 
@@ -86,6 +88,7 @@ class ThumbnailGeneratorService {
     required bool isPlaybackActive,
     String prefix = 'ep',
     ThumbnailMediaKitSession? mediaKitSession,
+    bool allowMediaKitFallback = true,
   }) async {
     if (isPlaybackActive) {
       return null;
@@ -95,15 +98,28 @@ class ThumbnailGeneratorService {
     if (!await videoFile.exists()) {
       return null;
     }
+    try {
+      if (await videoFile.length() == 0) {
+        return null;
+      }
+    } on FileSystemException {
+      return null;
+    }
 
     final cacheDir = await PortablePaths.getCacheDirectory();
-    final hashName =
-        base64Url.encode(utf8.encode(videoFilePath)).replaceAll('=', '');
+    final hashName = _stablePathHash(videoFilePath);
     final outputPath = p.join(cacheDir, '${prefix}_$hashName.jpg');
     final outputFile = File(outputPath);
 
     if (await outputFile.exists()) {
-      return outputPath;
+      try {
+        if (await outputFile.length() > 0) {
+          return outputPath;
+        }
+        await outputFile.delete();
+      } on FileSystemException {
+        return null;
+      }
     }
 
     final seekSeconds = _computeSeekSeconds(durationMs);
@@ -117,7 +133,7 @@ class ThumbnailGeneratorService {
       return ffmpegResult;
     }
 
-    if (isPlaybackActive) {
+    if (isPlaybackActive || !allowMediaKitFallback) {
       return null;
     }
 
@@ -160,8 +176,14 @@ class ThumbnailGeneratorService {
         runInShell: false,
       );
 
-      if (result.exitCode == 0 && await File(outputPath).exists()) {
+      final outFile = File(outputPath);
+      if (result.exitCode == 0 &&
+          await outFile.exists() &&
+          await outFile.length() > 0) {
         return outputPath;
+      }
+      if (await outFile.exists()) {
+        await outFile.delete();
       }
       return null;
     } on ProcessException {
@@ -240,6 +262,21 @@ class ThumbnailGeneratorService {
         await ownedSession.dispose();
       }
     }
+  }
+
+  static String _stablePathHash(String input) {
+    final bytes = utf8.encode(input);
+    var hashA = 0x811c9dc5;
+    var hashB = 0x9e3779b9;
+    for (final byte in bytes) {
+      hashA ^= byte;
+      hashA = (hashA * 0x01000193) & 0xFFFFFFFF;
+      hashB ^= (byte + 0x55) & 0xFF;
+      hashB = (hashB * 0x85EBCA6B) & 0xFFFFFFFF;
+    }
+    final hexA = hashA.toRadixString(16).padLeft(8, '0');
+    final hexB = hashB.toRadixString(16).padLeft(8, '0');
+    return '$hexA$hexB';
   }
 
   static String? _resolveFfmpegExecutable() {

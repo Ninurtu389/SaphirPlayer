@@ -12,9 +12,7 @@ class AppStrings {
   static const String windowRestoreTooltip = 'Wiederherstellen';
   static const String windowCloseTooltip = 'Schließen';
 
-  static const String portableModeLabel = 'Portabler Ordner';
   static const String nasPathLabel = 'NAS-Quellpfad';
-  static const String nasFoldersTitle = 'Quellordner (NAS & Lokal)';
   static const String nasPathHint = r'\\NAS\Serien oder D:\Filme';
   static const String addFolderButton = 'Ordner hinzufügen';
   static const String removeFolderTooltip = 'Ordner entfernen';
@@ -24,7 +22,6 @@ class AppStrings {
   static const String folderDuplicateStatus =
       'Dieser Quellordner ist bereits vorhanden';
   static const String folderRemovedStatus = 'Quellordner entfernt';
-  static const String effectModeLabel = 'Effekt-Modus';
   static const String effectGlassLabel = 'Glas (Blur & Animation)';
   static const String effectLeanLabel = 'Schlank (4 GB RAM / Ohne Blur)';
   static const String perDeviceEffectLabel =
@@ -61,16 +58,13 @@ class AppStrings {
   static const String continueWatchingTitle = 'Weiterschauen';
   static const String rediscoverTitle = 'Schon lange nicht mehr gesehen';
   static const String recentlyAddedTitle = 'Zuletzt hinzugefügt';
-  static const String randomPickButton = 'Was soll ich schauen?';
   static const String randomPickShortButton = 'Zufälliger Vorschlag';
   static const String resumeButton = 'Fortsetzen';
-  static const String openSeriesButton = 'Zur Serie';
   static const String detailsButton = 'Details';
   static const String searchHint = 'Serien, Folgen oder Filme suchen...';
   static const String emptyHomeMessage =
       'Noch keine Einträge vorhanden. NAS-Pfad prüfen und scannen.';
   static const String seasonPrefix = 'Staffel';
-  static const String episodePrefix = 'Folge';
   static const String watchedBadge = 'Gesehen';
   static const String remainingMinutesSuffix = 'Min. übrig';
   static const String backButton = 'Zurück';
@@ -91,6 +85,8 @@ class AppStrings {
   static const String playerAudioTrackTooltip = 'Tonspur';
   static const String playerSubtitleTrackTooltip = 'Untertitel';
   static const String playerSubtitleOffLabel = 'Aus';
+  static const String playerTrackPrefix = 'Spur';
+  static const String playerSubtitleTrackPrefix = 'Untertitel';
   static const String playerSpeedTooltip = 'Wiedergabegeschwindigkeit';
   static const String playerMuteTooltip = 'Stummschalten';
   static const String playerUnmuteTooltip = 'Ton aktivieren';
@@ -98,6 +94,11 @@ class AppStrings {
   static const String playerCloseTooltip = 'Player beenden (Esc)';
   static const String playerFileMissingError =
       'Videodatei auf dem NAS nicht erreichbar.';
+  static const String playerPlaybackError =
+      'Wiedergabe fehlgeschlagen. Videoformat oder Codec wird nicht unterstützt.';
+  static const String playerEmptyFileError =
+      'Videodatei ist leer oder beschädigt.';
+
   static const String libraryOverviewTitle = 'Serien & Filme';
   static const String filterAllLabel = 'Alle';
   static const String filterSeriesLabel = 'Serien';
@@ -107,7 +108,6 @@ class AppStrings {
   static const String seriesTypeBadge = 'Serie';
   static const String movieTypeBadge = 'Film';
   static const String playNowButton = 'Abspielen';
-  static const String seriesProgressLabel = 'Gesamtfortschritt';
 
   static const String autoNextTitle = 'Nächste Folge';
   static const String autoNextPlayNowButton = 'Jetzt starten';
@@ -115,7 +115,7 @@ class AppStrings {
   static const String autoNextSecondsSuffix = 'Sek.';
 
   static const String cacheSectionTitle = 'Thumbnail-Cache';
-  static const String cacheSizeLabel = 'Belegter Speicher';
+  static const String megabytesUnit = 'MB';
   static const String clearCacheButton = 'Cache leeren';
   static const String cacheClearedStatus = 'Thumbnail-Cache geleert';
   static const String syncNowButton = 'Sync abgleichen';

@@ -1,19 +1,27 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import '../services/desktop_platform_service.dart';
 import '../storage/database_service.dart';
 import '../storage/portable_paths.dart';
+import '../storage/progress_sync_service.dart';
 import '../theme/effect_mode.dart';
+import '../utils/formatters.dart';
 
 class SettingsController extends ChangeNotifier {
-  SettingsController(this._databaseService);
+  SettingsController(
+    this._databaseService, {
+    ProgressSyncService? syncService,
+  }) : _syncService = syncService ?? ProgressSyncService(_databaseService);
 
   final DatabaseService _databaseService;
+  final ProgressSyncService _syncService;
 
   static const String _nasPathKey = 'nas_root_path';
   static const String _nasPathsKey = 'nas_root_paths';
   static const String _globalEffectKey = 'effect_mode_global';
 
+  bool _isDisposed = false;
   List<String> _nasPaths = [];
   String _dataDirectoryPath = '';
   EffectMode _effectMode = EffectMode.glass;
@@ -26,8 +34,23 @@ class SettingsController extends ChangeNotifier {
   EffectMode get effectMode => _effectMode;
   bool get perDeviceEffect => _perDeviceEffect;
   int get cacheBytes => _cacheBytes;
+  String get formattedCacheSize => Formatters.formatCacheSize(_cacheBytes);
 
-  String get _deviceEffectKey => 'effect_mode_${Platform.localHostname}';
+  String get _deviceEffectKey =>
+      'effect_mode_${DesktopPlatformService.localHostname}';
+
+  Future<void> syncProgress() async {
+    await _syncService.syncWithRoots(_nasPaths);
+  }
+
+  Future<bool?> pickAndAddFolder(String dialogTitle) async {
+    final selectedDirectory =
+        await DesktopPlatformService.pickMediaDirectory(dialogTitle);
+    if (selectedDirectory == null) {
+      return null;
+    }
+    return addNasPath(selectedDirectory);
+  }
 
   Future<void> load() async {
     _dataDirectoryPath = await PortablePaths.getDataDirectory();
@@ -88,7 +111,7 @@ class SettingsController extends ChangeNotifier {
       );
     }
 
-    notifyListeners();
+    _safeNotify();
   }
 
   Future<void> refreshCacheSize() async {
@@ -100,13 +123,17 @@ class SettingsController extends ChangeNotifier {
       await for (final entity
           in cacheDir.list(recursive: false, followLinks: false)) {
         if (entity is File) {
-          totalBytes += await entity.length();
+          try {
+            totalBytes += await entity.length();
+          } on FileSystemException {
+            // Einzelne gesperrte Datei ignorieren
+          }
         }
       }
     }
 
     _cacheBytes = totalBytes;
-    notifyListeners();
+    _safeNotify();
   }
 
   Future<void> clearThumbnailCache() async {
@@ -231,6 +258,18 @@ class SettingsController extends ChangeNotifier {
     _effectMode = EffectMode.glass;
     _perDeviceEffect = true;
     await clearThumbnailCache();
-    notifyListeners();
+    _safeNotify();
+  }
+
+  void _safeNotify() {
+    if (!_isDisposed) {
+      notifyListeners();
+    }
+  }
+
+  @override
+  void dispose() {
+    _isDisposed = true;
+    super.dispose();
   }
 }

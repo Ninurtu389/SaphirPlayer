@@ -2,8 +2,10 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import '../../core/constants/app_spacing.dart';
 import '../../core/constants/app_strings.dart';
+import '../../core/services/desktop_platform_service.dart';
 import '../../core/storage/database_service.dart';
 import '../library/library_models.dart';
+import '../player/playback_session.dart';
 
 class HomeController extends ChangeNotifier {
   HomeController(this._databaseService);
@@ -51,7 +53,7 @@ class HomeController extends ChangeNotifier {
     final staleCutoffMs =
         nowMs - (AppSpacing.staleDaysDefault * AppSpacing.millisecondsPerDay);
 
-    final continueList = <MediaCardItem>[];
+    final continueEntries = <({int updatedAt, MediaCardItem item})>[];
 
     final epProgressRows = db.select(
       '''
@@ -86,8 +88,9 @@ class HomeController extends ChangeNotifier {
       final remMs = durMs > posMs ? durMs - posMs : 0;
       final remMin = (remMs / AppSpacing.millisecondsPerMinute).ceil();
 
-      continueList.add(
-        MediaCardItem(
+      continueEntries.add((
+        updatedAt: (row['updated_at'] as int?) ?? 0,
+        item: MediaCardItem(
           mediaKey: row['media_key'] as String,
           mediaType: 'episode',
           title: row['series_title'] as String,
@@ -101,7 +104,7 @@ class HomeController extends ChangeNotifier {
           seriesId: row['series_id'] as int,
           filePath: row['file_path'] as String,
         ),
-      );
+      ));
     }
 
     final movieProgressRows = db.select(
@@ -110,6 +113,7 @@ class HomeController extends ChangeNotifier {
         wp.media_key,
         wp.position_ms,
         wp.duration_ms,
+        wp.updated_at,
         m.title,
         m.release_year,
         m.file_path,
@@ -129,8 +133,9 @@ class HomeController extends ChangeNotifier {
       final remMs = durMs > posMs ? durMs - posMs : 0;
       final remMin = (remMs / AppSpacing.millisecondsPerMinute).ceil();
 
-      continueList.add(
-        MediaCardItem(
+      continueEntries.add((
+        updatedAt: (row['updated_at'] as int?) ?? 0,
+        item: MediaCardItem(
           mediaKey: row['media_key'] as String,
           mediaType: 'movie',
           title: row['title'] as String,
@@ -143,10 +148,11 @@ class HomeController extends ChangeNotifier {
           seriesId: null,
           filePath: row['file_path'] as String,
         ),
-      );
+      ));
     }
 
-    _continueWatching = continueList;
+    continueEntries.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    _continueWatching = continueEntries.map((e) => e.item).toList();
 
     final staleSeriesRows = db.select(
       '''
@@ -310,6 +316,22 @@ class HomeController extends ChangeNotifier {
     notifyListeners();
   }
 
+  int getMovieResumePositionMs(String mediaKey) {
+    final db = _databaseService.instance;
+    final rows = db.select(
+      'SELECT position_ms, completed FROM watch_progress WHERE media_key = ? LIMIT 1;',
+      [mediaKey],
+    );
+    if (rows.isEmpty) {
+      return 0;
+    }
+    final completed = (rows.first['completed'] as int?) == 1;
+    if (completed) {
+      return 0;
+    }
+    return (rows.first['position_ms'] as int?) ?? 0;
+  }
+
   MediaCardItem? pickRandomItem() {
     final pool = <MediaCardItem>[
       ..._rediscoverItems,
@@ -398,6 +420,55 @@ class HomeController extends ChangeNotifier {
       posterPath: sRow['poster_path'] as String?,
       summary: summary.isEmpty ? null : summary,
       seasons: seasons,
+    );
+  }
+
+  void toggleEpisodeWatchedLocal(EpisodeEntry episode) =>
+      toggleEpisodeWatched(episode, DesktopPlatformService.localHostname);
+
+  PlaybackSession buildSessionForCard(MediaCardItem item) {
+    if (item.seriesId != null) {
+      final detail = loadSeriesDetail(item.seriesId!);
+      if (detail != null) {
+        final flat = [for (final s in detail.seasons) ...s.episodes];
+        if (flat.isNotEmpty) {
+          final idx = flat.indexWhere((e) => e.filePath == item.filePath);
+          return PlaybackSession.fromEpisodes(
+            seriesTitle: detail.title,
+            episodes: flat,
+            startIndex: idx >= 0 ? idx : 0,
+          );
+        }
+      }
+    }
+    return PlaybackSession(
+      queue: [
+        PlaybackQueueEntry(
+          mediaKey: item.mediaKey,
+          mediaType: item.mediaType,
+          title: item.title,
+          subtitle: item.subtitle,
+          filePath: item.filePath,
+          seriesId: item.seriesId,
+          startPositionMs: item.mediaType == 'movie'
+              ? getMovieResumePositionMs(item.mediaKey)
+              : 0,
+        ),
+      ],
+      initialIndex: 0,
+    );
+  }
+
+  PlaybackSession buildSessionForEpisode(
+    SeriesDetailData detail,
+    EpisodeEntry selectedEpisode,
+  ) {
+    final flat = [for (final s in detail.seasons) ...s.episodes];
+    final idx = flat.indexWhere((e) => e.id == selectedEpisode.id);
+    return PlaybackSession.fromEpisodes(
+      seriesTitle: detail.title,
+      episodes: flat,
+      startIndex: idx >= 0 ? idx : 0,
     );
   }
 

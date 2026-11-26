@@ -10,11 +10,24 @@ class DatabaseService {
     }
     final resolvedPath = dbPath ?? await PortablePaths.getDatabaseFilePath();
     final db = sqlite3.open(resolvedPath);
-    db.execute('PRAGMA journal_mode = WAL;');
-    db.execute('PRAGMA synchronous = NORMAL;');
-    db.execute('PRAGMA foreign_keys = ON;');
-    _createSchema(db);
-    _db = db;
+    try {
+      db.execute('PRAGMA journal_mode = WAL;');
+      db.execute('PRAGMA synchronous = NORMAL;');
+      db.execute('PRAGMA foreign_keys = ON;');
+      db.execute('PRAGMA busy_timeout = 5000;');
+      _createSchema(db);
+      final versionRows = db.select('PRAGMA user_version;');
+      final currentVersion = versionRows.isNotEmpty
+          ? (versionRows.first.values.first as int? ?? 0)
+          : 0;
+      if (currentVersion == 0) {
+        db.execute('PRAGMA user_version = 1;');
+      }
+      _db = db;
+    } catch (_) {
+      db.dispose();
+      rethrow;
+    }
   }
 
   Database get instance {

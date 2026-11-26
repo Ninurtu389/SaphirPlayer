@@ -1,5 +1,4 @@
 import 'package:material_ui/material_ui.dart';
-import 'package:window_manager/window_manager.dart';
 import '../core/constants/app_colors.dart';
 import '../core/constants/app_spacing.dart';
 import '../core/constants/app_strings.dart';
@@ -34,7 +33,7 @@ class WindowTitleBar extends StatelessWidget {
               Positioned.fill(
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
-                  onPanStart: (_) => windowManager.startDragging(),
+                  onPanStart: (_) => shellController.startWindowDragging(),
                   onDoubleTap: shellController.toggleMaximizeWindow,
                   child: const SizedBox.expand(),
                 ),

@@ -14,6 +14,7 @@ class LibraryController extends ChangeNotifier {
   final SettingsController _settingsController;
   final NasScannerService _scannerService;
 
+  bool _isDisposed = false;
   bool _isScanning = false;
   int _seriesCount = 0;
   int _movieCount = 0;
@@ -174,17 +175,25 @@ class LibraryController extends ChangeNotifier {
     }
   }
 
+  Future<void> syncAndRefreshLibrary() async {
+    await _settingsController.syncProgress();
+    await refreshLibrary();
+  }
+
   Future<void> refreshLibrary() async {
-    if (_isScanning) {
+    if (_isScanning || _isDisposed) {
       return;
     }
     _isScanning = true;
     _statusMessage = AppStrings.scanningStatus;
-    notifyListeners();
+    _safeNotify();
 
     try {
       final result =
           await _scannerService.scanLibrary(_settingsController.nasPaths);
+      if (_isDisposed) {
+        return;
+      }
       _seriesCount = result.seriesCount;
       _movieCount = result.movieCount;
       _loadLibraryItemsInternal();
@@ -200,8 +209,20 @@ class LibraryController extends ChangeNotifier {
       await _settingsController.refreshCacheSize();
     } finally {
       _isScanning = false;
+      _safeNotify();
+    }
+  }
+
+  void _safeNotify() {
+    if (!_isDisposed) {
       notifyListeners();
     }
+  }
+
+  @override
+  void dispose() {
+    _isDisposed = true;
+    super.dispose();
   }
 
   void resetLibraryState() {

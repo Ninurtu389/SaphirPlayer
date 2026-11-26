@@ -1,10 +1,11 @@
-import 'dart:io';
 import 'package:material_ui/material_ui.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_spacing.dart';
 import '../../core/constants/app_strings.dart';
+import '../../core/services/local_file_service.dart';
 import '../../core/theme/effect_mode.dart';
 import 'library_models.dart';
+import 'widgets/episode_row.dart';
 
 class SeriesDetailView extends StatefulWidget {
   const SeriesDetailView({
@@ -39,8 +40,19 @@ class _SeriesDetailViewState extends State<SeriesDetailView> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildSeriesHeader(context),
-        if (seasons.isNotEmpty) _buildSeasonTabs(context, seasons),
+        _SeriesDetailHeader(
+          detail: widget.detail,
+          effectMode: widget.effectMode,
+          onBack: widget.onBack,
+          onPlayEpisode: widget.onPlayEpisode,
+        ),
+        if (seasons.isNotEmpty)
+          _SeasonTabs(
+            seasons: seasons,
+            selectedIndex: _selectedSeasonIndex,
+            onSelectSeason: (index) =>
+                setState(() => _selectedSeasonIndex = index),
+          ),
         Expanded(
           child: activeSeason == null
               ? const SizedBox.shrink()
@@ -55,13 +67,12 @@ class _SeriesDetailViewState extends State<SeriesDetailView> {
                     color: AppColors.dividerHairline,
                   ),
                   itemBuilder: (context, index) {
-                    return _EpisodeRow(
-                      episode: activeSeason.episodes[index],
+                    final ep = activeSeason.episodes[index];
+                    return EpisodeRow(
+                      episode: ep,
                       effectMode: widget.effectMode,
-                      onPlay: () =>
-                          widget.onPlayEpisode(activeSeason.episodes[index]),
-                      onToggleWatched: () =>
-                          widget.onToggleWatched(activeSeason.episodes[index]),
+                      onPlay: () => widget.onPlayEpisode(ep),
+                      onToggleWatched: () => widget.onToggleWatched(ep),
                     );
                   },
                 ),
@@ -69,14 +80,27 @@ class _SeriesDetailViewState extends State<SeriesDetailView> {
       ],
     );
   }
+}
 
-  Widget _buildSeriesHeader(BuildContext context) {
-    final detail = widget.detail;
-    final hasPoster =
-        detail.posterPath != null && File(detail.posterPath!).existsSync();
-    final isGlass = widget.effectMode == EffectMode.glass;
+class _SeriesDetailHeader extends StatelessWidget {
+  const _SeriesDetailHeader({
+    required this.detail,
+    required this.effectMode,
+    required this.onBack,
+    required this.onPlayEpisode,
+  });
+
+  final SeriesDetailData detail;
+  final EffectMode effectMode;
+  final VoidCallback onBack;
+  final ValueChanged<EpisodeEntry> onPlayEpisode;
+
+  @override
+  Widget build(BuildContext context) {
+    final imageProvider =
+        LocalFileService.imageProviderForPath(detail.posterPath);
+    final isGlass = effectMode == EffectMode.glass;
     final resumeEp = detail.nextResumeEpisode;
-    final fallbackColors = AppColors.coverGradientForTitle(detail.title);
 
     final playButtonLabel = resumeEp != null && resumeEp.positionMs > 0
         ? '${AppStrings.resumeButton} (S${resumeEp.seasonNumber.toString().padLeft(2, '0')}E${resumeEp.episodeNumber.toString().padLeft(2, '0')})'
@@ -88,18 +112,15 @@ class _SeriesDetailViewState extends State<SeriesDetailView> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (hasPoster)
-            Image.file(
-              File(detail.posterPath!),
-              fit: BoxFit.cover,
-            )
+          if (imageProvider != null)
+            Image(image: imageProvider, fit: BoxFit.cover)
           else
             DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
-                  colors: fallbackColors,
+                  colors: AppColors.coverGradientForTitle(detail.title),
                 ),
               ),
             ),
@@ -108,7 +129,7 @@ class _SeriesDetailViewState extends State<SeriesDetailView> {
               decoration: BoxDecoration(
                 gradient: RadialGradient(
                   center: Alignment.topRight,
-                  radius: 1.0,
+                  radius: AppSpacing.seriesHeaderGlowRadius,
                   colors: [
                     AppColors.sapphireGlow,
                     AppColors.borderTransparent,
@@ -136,87 +157,123 @@ class _SeriesDetailViewState extends State<SeriesDetailView> {
               ),
               child: IconButton(
                 tooltip: AppStrings.backButton,
-                onPressed: widget.onBack,
+                onPressed: onBack,
                 icon: const Icon(Icons.arrow_back),
               ),
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.xl,
-              vertical: AppSpacing.lg,
-            ),
-            child: Align(
-              alignment: Alignment.bottomLeft,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(
-                  maxWidth: AppSpacing.heroContentMaxWidth,
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      detail.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.headlineLarge,
-                    ),
-                    if (detail.summary != null) ...[
-                      const SizedBox(height: AppSpacing.xs),
-                      Text(
-                        detail.summary!,
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodyMedium
-                            ?.copyWith(color: AppColors.textSecondary),
-                      ),
-                    ],
-                    const SizedBox(height: AppSpacing.sm),
-                    Row(
-                      children: [
-                        Text(
-                          '${detail.watchedEpisodes} / ${detail.totalEpisodes} ${AppStrings.episodesCountLabel} ${AppStrings.watchedBadge.toLowerCase()}',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                        const SizedBox(width: AppSpacing.md),
-                        Expanded(
-                          child: ClipRRect(
-                            borderRadius:
-                                BorderRadius.circular(AppSpacing.radiusSm),
-                            child: LinearProgressIndicator(
-                              value: detail.overallProgress,
-                              minHeight: AppSpacing.progressBarHeight,
-                              backgroundColor: AppColors.progressTrack,
-                              valueColor: const AlwaysStoppedAnimation<Color>(
-                                AppColors.sapphireBright,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (resumeEp != null) ...[
-                      const SizedBox(height: AppSpacing.md),
-                      ElevatedButton.icon(
-                        onPressed: () => widget.onPlayEpisode(resumeEp),
-                        icon: const Icon(Icons.play_arrow),
-                        label: Text(playButtonLabel),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
+          _HeaderInfoOverlay(
+            detail: detail,
+            resumeEp: resumeEp,
+            playButtonLabel: playButtonLabel,
+            onPlayEpisode: onPlayEpisode,
           ),
         ],
       ),
     );
   }
+}
 
-  Widget _buildSeasonTabs(BuildContext context, List<SeasonGroup> seasons) {
+class _HeaderInfoOverlay extends StatelessWidget {
+  const _HeaderInfoOverlay({
+    required this.detail,
+    required this.resumeEp,
+    required this.playButtonLabel,
+    required this.onPlayEpisode,
+  });
+
+  final SeriesDetailData detail;
+  final EpisodeEntry? resumeEp;
+  final String playButtonLabel;
+  final ValueChanged<EpisodeEntry> onPlayEpisode;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.xl,
+        vertical: AppSpacing.lg,
+      ),
+      child: Align(
+        alignment: Alignment.bottomLeft,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(
+            maxWidth: AppSpacing.heroContentMaxWidth,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                detail.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.headlineLarge,
+              ),
+              if (detail.summary != null) ...[
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  detail.summary!,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodyMedium
+                      ?.copyWith(color: AppColors.textSecondary),
+                ),
+              ],
+              const SizedBox(height: AppSpacing.sm),
+              Row(
+                children: [
+                  Text(
+                    '${detail.watchedEpisodes} / ${detail.totalEpisodes} ${AppStrings.episodesCountLabel} ${AppStrings.watchedBadge.toLowerCase()}',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(width: AppSpacing.md),
+                  Expanded(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                      child: LinearProgressIndicator(
+                        value: detail.overallProgress,
+                        minHeight: AppSpacing.progressBarHeight,
+                        backgroundColor: AppColors.progressTrack,
+                        valueColor: const AlwaysStoppedAnimation<Color>(
+                          AppColors.sapphireBright,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              if (resumeEp != null) ...[
+                const SizedBox(height: AppSpacing.md),
+                ElevatedButton.icon(
+                  onPressed: () => onPlayEpisode(resumeEp!),
+                  icon: const Icon(Icons.play_arrow),
+                  label: Text(playButtonLabel),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SeasonTabs extends StatelessWidget {
+  const _SeasonTabs({
+    required this.seasons,
+    required this.selectedIndex,
+    required this.onSelectSeason,
+  });
+
+  final List<SeasonGroup> seasons;
+  final int selectedIndex;
+  final ValueChanged<int> onSelectSeason;
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
@@ -230,9 +287,9 @@ class _SeriesDetailViewState extends State<SeriesDetailView> {
         child: Row(
           children: List.generate(seasons.length, (index) {
             final season = seasons[index];
-            final selected = index == _selectedSeasonIndex;
+            final selected = index == selectedIndex;
             return InkWell(
-              onTap: () => setState(() => _selectedSeasonIndex = index),
+              onTap: () => onSelectSeason(index),
               child: Padding(
                 padding: const EdgeInsets.symmetric(
                   horizontal: AppSpacing.md,
@@ -265,169 +322,6 @@ class _SeriesDetailViewState extends State<SeriesDetailView> {
               ),
             );
           }),
-        ),
-      ),
-    );
-  }
-}
-
-class _EpisodeRow extends StatefulWidget {
-  const _EpisodeRow({
-    required this.episode,
-    required this.effectMode,
-    required this.onPlay,
-    required this.onToggleWatched,
-  });
-
-  final EpisodeEntry episode;
-  final EffectMode effectMode;
-  final VoidCallback onPlay;
-  final VoidCallback onToggleWatched;
-
-  @override
-  State<_EpisodeRow> createState() => _EpisodeRowState();
-}
-
-class _EpisodeRowState extends State<_EpisodeRow> {
-  bool _isHovered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final ep = widget.episode;
-    final hasThumb =
-        ep.thumbPath != null && File(ep.thumbPath!).existsSync();
-    final durationText = ep.formattedDuration;
-
-    return MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
-      child: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.sm,
-          vertical: AppSpacing.sm,
-        ),
-        decoration: BoxDecoration(
-          color: _isHovered ? AppColors.surfaceHover : Colors.transparent,
-          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-        ),
-        child: Row(
-          children: [
-            InkWell(
-              onTap: widget.onPlay,
-              borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-              child: SizedBox(
-                width: AppSpacing.episodeThumbWidth,
-                height: AppSpacing.episodeThumbHeight,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      if (hasThumb)
-                        Image.file(
-                          File(ep.thumbPath!),
-                          fit: BoxFit.cover,
-                          cacheWidth: AppSpacing.thumbWidth.toInt(),
-                          cacheHeight: AppSpacing.thumbHeight.toInt(),
-                        )
-                      else
-                        Container(
-                          color: AppColors.elevatedSurface,
-                          alignment: Alignment.center,
-                          child: const Icon(
-                            Icons.play_arrow,
-                            color: AppColors.sapphireBright,
-                            size: AppSpacing.iconSizeLg,
-                          ),
-                        ),
-                      if (_isHovered)
-                        Container(
-                          color: AppColors.badgeBackground,
-                          alignment: Alignment.center,
-                          child: const Icon(
-                            Icons.play_arrow,
-                            color: AppColors.textPrimary,
-                            size: AppSpacing.iconSizeXl,
-                          ),
-                        ),
-                      if (ep.progressRatio > 0 && !ep.isCompleted)
-                        Positioned(
-                          left: 0,
-                          right: 0,
-                          bottom: 0,
-                          child: LinearProgressIndicator(
-                            value: ep.progressRatio,
-                            minHeight: AppSpacing.progressBarHeight,
-                            backgroundColor: AppColors.progressTrack,
-                            valueColor: const AlwaysStoppedAnimation<Color>(
-                              AppColors.sapphireBright,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: AppSpacing.md),
-            Expanded(
-              child: InkWell(
-                onTap: widget.onPlay,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '${ep.episodeNumber}. ${ep.title}',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: AppSpacing.xxs),
-                    Row(
-                      children: [
-                        if (durationText.isNotEmpty) ...[
-                          Text(
-                            durationText,
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                          if (ep.isCompleted)
-                            const SizedBox(width: AppSpacing.sm),
-                        ],
-                        if (ep.isCompleted) ...[
-                          const Icon(
-                            Icons.check_circle,
-                            color: AppColors.successGreen,
-                            size: AppSpacing.iconSizeSm,
-                          ),
-                          const SizedBox(width: AppSpacing.xxs),
-                          Text(
-                            AppStrings.watchedBadge,
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(color: AppColors.successGreen),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(width: AppSpacing.sm),
-            IconButton(
-              tooltip: AppStrings.toggleWatchedAction,
-              onPressed: widget.onToggleWatched,
-              icon: Icon(
-                ep.isCompleted
-                    ? Icons.visibility_off
-                    : Icons.check_circle_outline,
-                color: ep.isCompleted
-                    ? AppColors.textSecondary
-                    : AppColors.sapphireBright,
-              ),
-            ),
-          ],
         ),
       ),
     );

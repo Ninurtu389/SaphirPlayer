@@ -4,6 +4,7 @@
 .flutter-plugins-dependencies
 .packages
 build/
+coverage/
 *.iml
 *.ipr
 *.iws
@@ -12,6 +13,11 @@ build/
 data/
 cache/
 portable.flag
+progress_sync.json
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
 
 # IDE / OS
 .vscode/

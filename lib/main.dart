@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:window_manager/window_manager.dart';
+import 'core/constants/app_spacing.dart';
 import 'core/constants/app_strings.dart';
 import 'core/controllers/library_controller.dart';
 import 'core/controllers/settings_controller.dart';
@@ -19,8 +20,8 @@ Future<void> main() async {
   await windowManager.ensureInitialized();
 
   const windowOptions = WindowOptions(
-    size: Size(1280, 800),
-    minimumSize: Size(800, 500),
+    size: Size(AppSpacing.defaultWindowWidth, AppSpacing.defaultWindowHeight),
+    minimumSize: Size(AppSpacing.minWindowWidth, AppSpacing.minWindowHeight),
     center: true,
     titleBarStyle: TitleBarStyle.hidden,
     title: AppStrings.appTitle,
@@ -34,11 +35,11 @@ Future<void> main() async {
   final databaseService = DatabaseService();
   await databaseService.open();
 
-  final settingsController = SettingsController(databaseService);
-  await settingsController.load();
-
   final syncService = ProgressSyncService(databaseService);
-  await syncService.syncWithRoots(settingsController.nasPaths);
+  final settingsController =
+      SettingsController(databaseService, syncService: syncService);
+  await settingsController.load();
+  await settingsController.syncProgress();
 
   final libraryController =
       LibraryController(databaseService, settingsController);
@@ -67,7 +68,6 @@ Future<void> main() async {
       homeController: homeController,
       statsController: statsController,
       playerController: playerController,
-      syncService: syncService,
     ),
   );
 }
@@ -81,7 +81,6 @@ class SaphirPlayerApp extends StatelessWidget {
     required this.homeController,
     required this.statsController,
     required this.playerController,
-    required this.syncService,
   });
 
   final ShellController shellController;
@@ -90,7 +89,6 @@ class SaphirPlayerApp extends StatelessWidget {
   final HomeController homeController;
   final StatsController statsController;
   final SaphirPlayerController playerController;
-  final ProgressSyncService syncService;
 
   @override
   Widget build(BuildContext context) {
@@ -105,7 +103,6 @@ class SaphirPlayerApp extends StatelessWidget {
         homeController: homeController,
         statsController: statsController,
         playerController: playerController,
-        syncService: syncService,
       ),
     );
   }

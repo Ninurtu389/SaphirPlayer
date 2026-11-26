@@ -185,7 +185,7 @@ class StatsController extends ChangeNotifier {
     if (year == null || month == null || day == null) {
       return null;
     }
-    return DateTime(year, month, day);
+    return DateTime.utc(year, month, day);
   }
 
   static (int, int) _computeStreaks(List<DateTime> sortedDates) {
@@ -208,10 +208,11 @@ class StatsController extends ChangeNotifier {
     }
 
     final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
+    final today = DateTime.utc(now.year, now.month, now.day);
     final lastDate = sortedDates.last;
     final daysSinceLast = today.difference(lastDate).inDays;
-    final currentStreak = daysSinceLast <= 1 ? currentRun : 0;
+    final currentStreak =
+        (daysSinceLast >= 0 && daysSinceLast <= 1) ? currentRun : 0;
 
     return (currentStreak, longest);
   }

@@ -6,6 +6,7 @@ import '../../core/storage/database_service.dart';
 import '../../core/storage/portable_paths.dart';
 import '../library/metadata_reader.dart';
 import 'media_parser.dart';
+import 'nas_scan_repository.dart';
 import 'thumbnail_generator_service.dart';
 
 class ScanResult {
@@ -32,40 +33,12 @@ class _ScanPayload {
   final String thumbCacheDir;
 }
 
-class _ScannedSeriesData {
-  const _ScannedSeriesData({
-    required this.title,
-    required this.folderPath,
-    required this.posterPath,
-    required this.summary,
-    required this.episodes,
-  });
-
-  final String title;
-  final String folderPath;
-  final String? posterPath;
-  final String? summary;
-  final List<ParsedEpisode> episodes;
-}
-
-class _ScanOutput {
-  const _ScanOutput({
-    required this.nasReachable,
-    required this.reachableRoots,
-    required this.seriesList,
-    required this.movies,
-  });
-
-  final bool nasReachable;
-  final List<String> reachableRoots;
-  final List<_ScannedSeriesData> seriesList;
-  final List<ParsedMovie> movies;
-}
-
 class NasScannerService {
-  NasScannerService(this._databaseService);
+  NasScannerService(this._databaseService)
+      : _repository = NasScanRepository(_databaseService);
 
   final DatabaseService _databaseService;
+  final NasScanRepository _repository;
   bool _isPlaybackActive = false;
 
   bool get isPlaybackActive => _isPlaybackActive;
@@ -76,7 +49,7 @@ class NasScannerService {
 
   Future<ScanResult> scanLibrary(List<String> rootPaths) async {
     if (_isPlaybackActive) {
-      final counts = _currentCounts();
+      final counts = _repository.currentCounts();
       return ScanResult(
         nasReachable: true,
         seriesCount: counts.$1,
@@ -95,7 +68,7 @@ class NasScannerService {
     }
 
     if (cleanedPaths.isEmpty) {
-      final counts = _currentCounts();
+      final counts = _repository.currentCounts();
       return ScanResult(
         nasReachable: false,
         seriesCount: counts.$1,
@@ -115,7 +88,7 @@ class NasScannerService {
     );
 
     if (!output.nasReachable) {
-      final counts = _currentCounts();
+      final counts = _repository.currentCounts();
       return ScanResult(
         nasReachable: false,
         seriesCount: counts.$1,
@@ -124,9 +97,9 @@ class NasScannerService {
       );
     }
 
-    _applyDiffToDatabase(output);
+    _repository.applyDiff(output);
     await _generateMissingThumbnails();
-    final counts = _currentCounts();
+    final counts = _repository.currentCounts();
 
     return ScanResult(
       nasReachable: true,
@@ -186,6 +159,7 @@ class NasScannerService {
           durationMs: durationMs,
           isPlaybackActive: _isPlaybackActive,
           mediaKitSession: mediaKitSession,
+          allowMediaKitFallback: mediaKitSession != null,
         );
 
         if (thumbPath != null && !_isPlaybackActive) {
@@ -210,6 +184,7 @@ class NasScannerService {
           isPlaybackActive: _isPlaybackActive,
           prefix: 'mv',
           mediaKitSession: mediaKitSession,
+          allowMediaKitFallback: mediaKitSession != null,
         );
 
         if (thumbPath != null && !_isPlaybackActive) {
@@ -224,174 +199,7 @@ class NasScannerService {
     }
   }
 
-  (int, int) _currentCounts() {
-    final db = _databaseService.instance;
-    final seriesRow = db.select('SELECT COUNT(*) AS cnt FROM series;').first;
-    final moviesRow = db.select('SELECT COUNT(*) AS cnt FROM movies;').first;
-    return (seriesRow['cnt'] as int, moviesRow['cnt'] as int);
-  }
-
-  void _applyDiffToDatabase(_ScanOutput output) {
-    final db = _databaseService.instance;
-    db.execute('BEGIN TRANSACTION;');
-
-    try {
-      final activeEpisodePaths = <String>{};
-      final activeMoviePaths = <String>{};
-
-      for (final item in output.seriesList) {
-        db.execute(
-          '''
-          INSERT INTO series (title, folder_path, poster_path, summary)
-          VALUES (?, ?, ?, ?)
-          ON CONFLICT(folder_path) DO UPDATE SET
-            title = excluded.title,
-            poster_path = COALESCE(excluded.poster_path, series.poster_path),
-            summary = COALESCE(excluded.summary, series.summary);
-          ''',
-          [item.title, item.folderPath, item.posterPath, item.summary],
-        );
-
-        final seriesRow = db.select(
-          'SELECT id FROM series WHERE folder_path = ? LIMIT 1;',
-          [item.folderPath],
-        ).first;
-        final seriesId = seriesRow['id'] as int;
-
-        for (final ep in item.episodes) {
-          activeEpisodePaths.add(ep.filePath);
-          final seasonFolder = p.dirname(ep.filePath);
-
-          db.execute(
-            '''
-            INSERT INTO seasons (series_id, season_number, folder_path)
-            VALUES (?, ?, ?)
-            ON CONFLICT(series_id, season_number) DO UPDATE SET
-              folder_path = excluded.folder_path;
-            ''',
-            [seriesId, ep.seasonNumber, seasonFolder],
-          );
-
-          final seasonRow = db.select(
-            'SELECT id FROM seasons WHERE series_id = ? AND season_number = ? LIMIT 1;',
-            [seriesId, ep.seasonNumber],
-          ).first;
-          final seasonId = seasonRow['id'] as int;
-
-          final existingEp = db.select(
-            'SELECT id FROM episodes WHERE file_path = ? LIMIT 1;',
-            [ep.filePath],
-          );
-
-          if (existingEp.isEmpty) {
-            db.execute(
-              '''
-              INSERT INTO episodes (series_id, season_id, episode_number, title, file_path)
-              VALUES (?, ?, ?, ?, ?);
-              ''',
-              [
-                seriesId,
-                seasonId,
-                ep.episodeNumber,
-                ep.episodeTitle,
-                ep.filePath
-              ],
-            );
-          } else {
-            db.execute(
-              '''
-              UPDATE episodes
-              SET series_id = ?, season_id = ?, episode_number = ?, title = ?
-              WHERE file_path = ?;
-              ''',
-              [
-                seriesId,
-                seasonId,
-                ep.episodeNumber,
-                ep.episodeTitle,
-                ep.filePath
-              ],
-            );
-          }
-        }
-      }
-
-      for (final movie in output.movies) {
-        activeMoviePaths.add(movie.filePath);
-        final posterPath = _findLocalPosterNearFile(movie.filePath);
-
-        db.execute(
-          '''
-          INSERT INTO movies (title, release_year, file_path, poster_path)
-          VALUES (?, ?, ?, ?)
-          ON CONFLICT(file_path) DO UPDATE SET
-            title = excluded.title,
-            release_year = excluded.release_year,
-            poster_path = COALESCE(excluded.poster_path, movies.poster_path);
-          ''',
-          [movie.title, movie.releaseYear, movie.filePath, posterPath],
-        );
-      }
-
-      final allEpisodes = db.select('SELECT id, file_path FROM episodes;');
-      for (final row in allEpisodes) {
-        final pathStr = row['file_path'] as String;
-        if (_isPathUnderAnyRoot(pathStr, output.reachableRoots) &&
-            !activeEpisodePaths.contains(pathStr)) {
-          db.execute('DELETE FROM episodes WHERE id = ?;', [row['id']]);
-        }
-      }
-
-      final allMovies = db.select('SELECT id, file_path FROM movies;');
-      for (final row in allMovies) {
-        final pathStr = row['file_path'] as String;
-        if (_isPathUnderAnyRoot(pathStr, output.reachableRoots) &&
-            !activeMoviePaths.contains(pathStr)) {
-          db.execute('DELETE FROM movies WHERE id = ?;', [row['id']]);
-        }
-      }
-
-      db.execute('COMMIT;');
-    } catch (_) {
-      db.execute('ROLLBACK;');
-      rethrow;
-    }
-  }
-
-  static String? _findLocalPosterInDir(String dirPath) {
-    final dir = Directory(dirPath);
-    if (!dir.existsSync()) {
-      return null;
-    }
-    for (final entity in dir.listSync(followLinks: false)) {
-      if (entity is File && MediaParser.isImageFile(entity.path)) {
-        final name = p.basenameWithoutExtension(entity.path).toLowerCase();
-        if (name == 'poster' || name == 'folder' || name == 'cover') {
-          return entity.path;
-        }
-      }
-    }
-    return null;
-  }
-
-  static String? _findLocalPosterNearFile(String mediaFilePath) {
-    return _findLocalPosterInDir(p.dirname(mediaFilePath));
-  }
-
-  static bool _isPathUnderAnyRoot(String filePath, List<String> roots) {
-    final normalizedFile = p.normalize(filePath).toLowerCase();
-    for (final root in roots) {
-      final normalizedRoot = p.normalize(root).toLowerCase();
-      if (normalizedFile == normalizedRoot ||
-          normalizedFile.startsWith('$normalizedRoot${p.separator}') ||
-          normalizedFile.startsWith('$normalizedRoot/')) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  static _ScanOutput _runScanInIsolate(_ScanPayload payload) {
+  static ScanOutput _runScanInIsolate(_ScanPayload payload) {
     final reachableRoots = <String>[];
     final episodesBySeries = <String, List<ParsedEpisode>>{};
     final posterBySeries = <String, String>{};
@@ -405,19 +213,14 @@ class NasScannerService {
         continue;
       }
 
-      List<FileSystemEntity> entries;
-      try {
-        entries = rootDir.listSync(recursive: true, followLinks: false);
-      } on FileSystemException {
+      final entries = _listFilesSafely(rootDir);
+      if (entries == null) {
         continue;
       }
 
       reachableRoots.add(rootPath);
 
       for (final entity in entries) {
-        if (entity is! File) {
-          continue;
-        }
         final filePath = entity.path;
         if (!MediaParser.isVideoFile(filePath)) {
           continue;
@@ -432,8 +235,8 @@ class NasScannerService {
           posterBySeries.putIfAbsent(
             key,
             () =>
-                _findLocalPosterInDir(seriesFolder) ??
-                _findLocalPosterNearFile(filePath) ??
+                NasScanRepository.findLocalPosterInDir(seriesFolder) ??
+                NasScanRepository.findLocalPosterNearFile(filePath) ??
                 '',
           );
           summaryBySeries.putIfAbsent(
@@ -447,7 +250,7 @@ class NasScannerService {
     }
 
     if (reachableRoots.isEmpty) {
-      return const _ScanOutput(
+      return const ScanOutput(
         nasReachable: false,
         reachableRoots: [],
         seriesList: [],
@@ -455,7 +258,7 @@ class NasScannerService {
       );
     }
 
-    final seriesList = <_ScannedSeriesData>[];
+    final seriesList = <ScannedSeriesData>[];
     for (final entry in episodesBySeries.entries) {
       final key = entry.key;
       final eps = entry.value;
@@ -464,7 +267,7 @@ class NasScannerService {
       }
       final posterRaw = posterBySeries[key];
       seriesList.add(
-        _ScannedSeriesData(
+        ScannedSeriesData(
           title: eps.first.seriesTitle,
           folderPath: folderBySeries[key] ?? reachableRoots.first,
           posterPath:
@@ -475,12 +278,38 @@ class NasScannerService {
       );
     }
 
-    return _ScanOutput(
+    return ScanOutput(
       nasReachable: true,
       reachableRoots: reachableRoots,
       seriesList: seriesList,
       movies: movies,
     );
+  }
+
+  static List<File>? _listFilesSafely(Directory rootDir) {
+    final files = <File>[];
+    final pendingDirs = <Directory>[rootDir];
+    var rootReadable = false;
+
+    while (pendingDirs.isNotEmpty) {
+      final current = pendingDirs.removeLast();
+      try {
+        final children = current.listSync(recursive: false, followLinks: false);
+        rootReadable = true;
+        for (final entity in children) {
+          if (entity is File) {
+            files.add(entity);
+          } else if (entity is Directory) {
+            pendingDirs.add(entity);
+          }
+        }
+      } on FileSystemException {
+        if (!rootReadable && current.path == rootDir.path) {
+          return null;
+        }
+      }
+    }
+    return files;
   }
 
   static String _resolveSeriesRoot(String episodeFilePath, String rootPath) {
