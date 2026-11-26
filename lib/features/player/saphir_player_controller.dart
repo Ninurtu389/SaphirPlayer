@@ -58,6 +58,11 @@ class SaphirPlayerController extends ChangeNotifier {
   SubtitleTrack _activeSubtitleTrack = SubtitleTrack.auto();
   String? _errorMessage;
 
+  DateTime? _playSegmentStartedAt;
+  int? _activeHistoryRowId;
+  String? _activeHistoryMediaKey;
+  String? _activeHistoryDayKey;
+
   VideoController get videoController => _videoController;
   PlaybackSession? get session => _session;
   PlaybackQueueEntry? get currentEntry {
@@ -127,10 +132,12 @@ class SaphirPlayerController extends ChangeNotifier {
       _player.stream.playing.listen((playing) {
         _isPlaying = playing;
         if (!playing) {
+          _recordWatchHistorySlice();
           _stopProgressTimer();
           _persistProgress(syncRemote: true);
           showHud(keepVisibleWhilePaused: true);
         } else {
+          _playSegmentStartedAt ??= DateTime.now();
           _startProgressTimer();
           registerUserActivity();
         }
@@ -286,6 +293,10 @@ class SaphirPlayerController extends ChangeNotifier {
     _errorMessage = null;
     _position = Duration.zero;
     _duration = Duration.zero;
+    _playSegmentStartedAt = null;
+    _activeHistoryRowId = null;
+    _activeHistoryMediaKey = null;
+    _activeHistoryDayKey = null;
     notifyListeners();
 
     final entry = activeSession.queue[_currentIndex];
@@ -418,20 +429,87 @@ class SaphirPlayerController extends ChangeNotifier {
   Future<void> stopAndClose() async {
     _hudHideTimer?.cancel();
     _stopProgressTimer();
+    _recordWatchHistorySlice();
     _persistProgress(syncRemote: true);
     await _player.stop();
     if (_isFullscreen) {
       _isFullscreen = false;
       await windowManager.setFullScreen(false);
     }
+    _playSegmentStartedAt = null;
+    _activeHistoryRowId = null;
+    _activeHistoryMediaKey = null;
+    _activeHistoryDayKey = null;
     _session = null;
     notifyListeners();
+  }
+
+  void _recordWatchHistorySlice() {
+    final startedAt = _playSegmentStartedAt;
+    final entry = currentEntry;
+    if (startedAt == null || entry == null) {
+      return;
+    }
+
+    final now = DateTime.now();
+    _playSegmentStartedAt = _isPlaying ? now : null;
+
+    var elapsedMs = now.difference(startedAt).inMilliseconds;
+    if (elapsedMs < AppSpacing.millisecondsPerSecond) {
+      return;
+    }
+    const maxSliceMs = 60 * AppSpacing.millisecondsPerSecond;
+    if (elapsedMs > maxSliceMs) {
+      elapsedMs = maxSliceMs;
+    }
+
+    final dayKey =
+        '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    final nowMs = now.millisecondsSinceEpoch;
+    final db = _databaseService.instance;
+
+    if (_activeHistoryRowId != null &&
+        _activeHistoryMediaKey == entry.mediaKey &&
+        _activeHistoryDayKey == dayKey) {
+      db.execute(
+        'UPDATE watch_history SET watched_ms = watched_ms + ?, ended_at = ? WHERE id = ?;',
+        [elapsedMs, nowMs, _activeHistoryRowId],
+      );
+      return;
+    }
+
+    db.execute(
+      '''
+      INSERT INTO watch_history (
+        media_key, media_type, title, series_id, watched_ms, started_at, ended_at, day_key, weekday, source_device
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+      ''',
+      [
+        entry.mediaKey,
+        entry.mediaType,
+        entry.title,
+        entry.seriesId,
+        elapsedMs,
+        startedAt.millisecondsSinceEpoch,
+        nowMs,
+        dayKey,
+        now.weekday,
+        Platform.localHostname,
+      ],
+    );
+    _activeHistoryRowId = db.lastInsertRowId;
+    _activeHistoryMediaKey = entry.mediaKey;
+    _activeHistoryDayKey = dayKey;
   }
 
   void _persistProgress({
     bool forceCompleted = false,
     bool syncRemote = false,
   }) {
+    if (_isPlaying) {
+      _recordWatchHistorySlice();
+    }
     final entry = currentEntry;
     if (entry == null) {
       return;

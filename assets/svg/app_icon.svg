@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="SaphirPlayer Logo">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#141C2B" />
+      <stop offset="100%" stop-color="#070A0F" />
+    </linearGradient>
+
+    <radialGradient id="sapphireGlow" cx="50%" cy="48%" r="46%">
+      <stop offset="0%" stop-color="#4B9BFF" stop-opacity="0.32" />
+      <stop offset="100%" stop-color="#070A0F" stop-opacity="0" />
+    </radialGradient>
+
+    <linearGradient id="gemTopLeft" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#89C4FF" />
+      <stop offset="100%" stop-color="#3585F7" />
+    </linearGradient>
+
+    <linearGradient id="gemTopRight" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4B9BFF" />
+      <stop offset="100%" stop-color="#1963D1" />
+    </linearGradient>
+
+    <linearGradient id="gemBottomLeft" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2878EC" />
+      <stop offset="100%" stop-color="#104499" />
+    </linearGradient>
+
+    <linearGradient id="gemBottomRight" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#185EC7" />
+      <stop offset="100%" stop-color="#0B2E6B" />
+    </linearGradient>
+
+    <linearGradient id="gemCenter" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#5CA8FF" />
+      <stop offset="100%" stop-color="#1D6FE5" />
+    </linearGradient>
+
+    <linearGradient id="playGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="100%" stop-color="#DCEBFF" />
+    </linearGradient>
+
+    <linearGradient id="borderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4B9BFF" stop-opacity="0.55" />
+      <stop offset="50%" stop-color="#233047" stop-opacity="0.9" />
+      <stop offset="100%" stop-color="#1D6FE5" stop-opacity="0.45" />
+    </linearGradient>
+  </defs>
+
+  
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="url(#bgGrad)" stroke="url(#borderGrad)" stroke-width="6" />
+
+  
+  <circle cx="256" cy="256" r="200" fill="url(#sapphireGlow)" />
+
+  
+  
+  <polygon points="256,74 128,162 184,196 256,144" fill="url(#gemTopLeft)" />
+  
+  <polygon points="256,74 384,162 328,196 256,144" fill="url(#gemTopRight)" />
+  
+  <polygon points="128,162 128,350 184,316 184,196" fill="url(#gemBottomLeft)" />
+  
+  <polygon points="384,162 384,350 328,316 328,196" fill="url(#gemBottomRight)" />
+  
+  <polygon points="128,350 256,438 256,368 184,316" fill="#0E3B87" />
+  
+  <polygon points="384,350 256,438 256,368 328,316" fill="#092659" />
+
+  
+  <polygon points="256,144 328,196 328,316 256,368 184,316 184,196" fill="url(#gemCenter)" />
+
+  
+  <polyline points="128,162 256,74 384,162" fill="none" stroke="#B6DCFF" stroke-opacity="0.65" stroke-width="3" stroke-linejoin="round" />
+  <polygon points="256,74 384,162 384,350 256,438 128,350 128,162" fill="none" stroke="#6FB5FF" stroke-opacity="0.45" stroke-width="3.5" stroke-linejoin="round" />
+  <polygon points="256,144 328,196 328,316 256,368 184,316 184,196" fill="none" stroke="#A8D4FF" stroke-opacity="0.55" stroke-width="2.5" stroke-linejoin="round" />
+
+  
+  <path d="M234 214 C234 208.5 240 205.2 244.7 208.1 L301 243.1 C305.5 245.9 305.5 252.5 301 255.3 L244.7 290.3 C240 293.2 234 289.9 234 284.4 Z" fill="url(#playGrad)" />
+</svg>

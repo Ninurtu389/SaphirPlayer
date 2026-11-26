@@ -6,6 +6,7 @@ import '../player/playback_session.dart';
 enum AppSection {
   home,
   library,
+  stats,
   settings,
 }
 

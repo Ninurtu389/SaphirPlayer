@@ -129,7 +129,9 @@ class _SaphirPlayerViewState extends State<SaphirPlayerView> {
           left: 0,
           right: 0,
           child: Container(
-            height: AppSpacing.playerTopHudHeight,
+            constraints: const BoxConstraints(
+              minHeight: AppSpacing.playerTopHudHeight,
+            ),
             padding: const EdgeInsets.symmetric(
               horizontal: AppSpacing.lg,
               vertical: AppSpacing.md,
@@ -186,7 +188,9 @@ class _SaphirPlayerViewState extends State<SaphirPlayerView> {
           left: 0,
           right: 0,
           child: Container(
-            height: AppSpacing.playerBottomHudHeight,
+            constraints: const BoxConstraints(
+              minHeight: AppSpacing.playerBottomHudHeight,
+            ),
             padding: const EdgeInsets.fromLTRB(
               AppSpacing.lg,
               AppSpacing.lg,
@@ -197,6 +201,7 @@ class _SaphirPlayerViewState extends State<SaphirPlayerView> {
               gradient: AppColors.playerBottomHudGradient,
             ),
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 Row(
@@ -254,6 +259,8 @@ class _SaphirPlayerViewState extends State<SaphirPlayerView> {
                       icon: const Icon(Icons.replay_10),
                     ),
                     IconButton(
+                      padding: const EdgeInsets.all(AppSpacing.xxs),
+                      constraints: const BoxConstraints(),
                       tooltip: widget.controller.isPlaying
                           ? AppStrings.playerPauseTooltip
                           : AppStrings.playerPlayTooltip,

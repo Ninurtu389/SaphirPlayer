@@ -103,6 +103,48 @@ class DatabaseService {
         FOREIGN KEY (series_id) REFERENCES series(id) ON DELETE CASCADE
       );
     ''');
+
+    db.execute('''
+      CREATE TABLE IF NOT EXISTS watch_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        media_key TEXT NOT NULL,
+        media_type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        series_id INTEGER,
+        watched_ms INTEGER NOT NULL DEFAULT 0,
+        started_at INTEGER NOT NULL,
+        ended_at INTEGER NOT NULL,
+        day_key TEXT NOT NULL,
+        weekday INTEGER NOT NULL,
+        source_device TEXT NOT NULL
+      );
+    ''');
+
+    db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_watch_history_day ON watch_history(day_key);',
+    );
+    db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_watch_history_media ON watch_history(media_key);',
+    );
+  }
+
+  void resetDatabase() {
+    final db = instance;
+    db.execute('BEGIN TRANSACTION;');
+    try {
+      db.execute('DELETE FROM watch_history;');
+      db.execute('DELETE FROM watch_progress;');
+      db.execute('DELETE FROM series_preferences;');
+      db.execute('DELETE FROM episodes;');
+      db.execute('DELETE FROM seasons;');
+      db.execute('DELETE FROM series;');
+      db.execute('DELETE FROM movies;');
+      db.execute('DELETE FROM app_settings;');
+      db.execute('COMMIT;');
+    } catch (_) {
+      db.execute('ROLLBACK;');
+      rethrow;
+    }
   }
 
   void close() {

@@ -53,20 +53,54 @@ class MediaParser {
     r'[Ss](\d{1,2})[\s._-]*[Ee](\d{1,3})',
   );
 
+  static final RegExp _seasonEpisodeTextPattern = RegExp(
+    r'(?:staffel|season)[\s._-]*(\d{1,2})[\s._\-–—:]*(?:folge|episode|ep?)[\s._-]*(\d{1,3})',
+    caseSensitive: false,
+  );
+
   static final RegExp _xPattern = RegExp(
     r'(?<![a-zA-Z0-9])(\d{1,2})x(\d{1,3})(?![a-zA-Z0-9])',
   );
 
+  static final RegExp _dottedSeasonEpisodePattern = RegExp(
+    r'^(\d{1,2})\.(\d{2,3})(?:[\s._\-–—:]+|$)',
+  );
+
   static final RegExp _exxPattern = RegExp(
-    r'\b[Ee][Pp]?[\s._-]*(\d{1,3})\b',
+    r'(?<![a-zA-Z0-9])(?:episode|folge|ep?)[\s._-]*(\d{1,3})(?![a-zA-Z0-9])',
+    caseSensitive: false,
+  );
+
+  static final RegExp _leadingNumberPattern = RegExp(
+    r'^(\d{1,3})(?:[\s._\-–—:]+|$)',
   );
 
   static final RegExp _seasonFolderPattern = RegExp(
-    r'(?:staffel|season|s)[\s._-]*(\d{1,2})',
+    r'(?:^|[\s._\-\[\(])(?:staffel|season|s)[\s._-]*(\d{1,2})(?:$|[\s._\-\]\)])',
+    caseSensitive: false,
+  );
+
+  static final RegExp _numericFolderPattern = RegExp(r'^\d{1,2}$');
+
+  static final RegExp _technicalSubfolderPattern = RegExp(
+    r'^(?:cd|disc|disk|dvd|part|teil|specials?|extras?|bonus)[\s._-]*\d*$',
     caseSensitive: false,
   );
 
   static final RegExp _yearPattern = RegExp(r'\b(19\d{2}|20\d{2})\b');
+
+  static bool isNonSeriesSubfolder(String segment) {
+    final trimmed = segment.trim();
+    if (trimmed.isEmpty) {
+      return true;
+    }
+    return _seasonFolderPattern.hasMatch(trimmed) ||
+        _numericFolderPattern.hasMatch(trimmed) ||
+        _technicalSubfolderPattern.hasMatch(trimmed) ||
+        _sxxExxPattern.hasMatch(trimmed) ||
+        _xPattern.hasMatch(trimmed) ||
+        _exxPattern.hasMatch(trimmed);
+  }
 
   static bool isVideoFile(String filePath) {
     final ext = p.extension(filePath).toLowerCase();
@@ -93,17 +127,44 @@ class MediaParser {
       episodeNum = int.tryParse(sMatch.group(2) ?? '');
       episodeMatch = sMatch;
     } else {
-      final xMatch = _xPattern.firstMatch(baseName);
-      if (xMatch != null) {
-        seasonNum = int.tryParse(xMatch.group(1) ?? '');
-        episodeNum = int.tryParse(xMatch.group(2) ?? '');
-        episodeMatch = xMatch;
+      final textMatch = _seasonEpisodeTextPattern.firstMatch(baseName);
+      if (textMatch != null) {
+        seasonNum = int.tryParse(textMatch.group(1) ?? '');
+        episodeNum = int.tryParse(textMatch.group(2) ?? '');
+        episodeMatch = textMatch;
       } else {
-        final eMatch = _exxPattern.firstMatch(baseName);
-        if (eMatch != null) {
-          episodeNum = int.tryParse(eMatch.group(1) ?? '');
-          episodeMatch = eMatch;
+        final xMatch = _xPattern.firstMatch(baseName);
+        if (xMatch != null) {
+          seasonNum = int.tryParse(xMatch.group(1) ?? '');
+          episodeNum = int.tryParse(xMatch.group(2) ?? '');
+          episodeMatch = xMatch;
+        } else {
+          final dotMatch = _dottedSeasonEpisodePattern.firstMatch(baseName);
+          if (dotMatch != null) {
+            seasonNum = int.tryParse(dotMatch.group(1) ?? '');
+            episodeNum = int.tryParse(dotMatch.group(2) ?? '');
+            episodeMatch = dotMatch;
+          } else {
+            final eMatch = _exxPattern.firstMatch(baseName);
+            if (eMatch != null) {
+              episodeNum = int.tryParse(eMatch.group(1) ?? '');
+              episodeMatch = eMatch;
+            }
+          }
         }
+      }
+    }
+
+    final folderSeason = _findSeasonFolder(segments);
+    if (seasonNum == null && folderSeason != null) {
+      seasonNum = folderSeason.$2;
+    }
+
+    if (episodeNum == null && folderSeason != null) {
+      final leadingMatch = _leadingNumberPattern.firstMatch(baseName);
+      if (leadingMatch != null) {
+        episodeNum = int.tryParse(leadingMatch.group(1) ?? '');
+        episodeMatch = leadingMatch;
       }
     }
 
@@ -111,20 +172,9 @@ class MediaParser {
       return null;
     }
 
-    if (seasonNum == null) {
-      for (final segment in segments) {
-        final folderMatch = _seasonFolderPattern.firstMatch(segment);
-        if (folderMatch != null) {
-          seasonNum = int.tryParse(folderMatch.group(1) ?? '');
-          if (seasonNum != null) {
-            break;
-          }
-        }
-      }
-    }
-
     final resolvedSeason = seasonNum ?? 1;
-    final seriesTitle = _resolveSeriesTitle(segments, baseName);
+    final seriesTitle =
+        _resolveSeriesTitle(segments, baseName, episodeMatch, folderSeason?.$1);
     final episodeTitle =
         _resolveEpisodeTitle(baseName, episodeMatch, episodeNum);
 
@@ -135,6 +185,30 @@ class MediaParser {
       episodeTitle: episodeTitle,
       filePath: filePath,
     );
+  }
+
+  static (int, int)? _findSeasonFolder(List<String> segments) {
+    for (var i = 0; i < segments.length - 1; i++) {
+      final folderMatch = _seasonFolderPattern.firstMatch(segments[i]);
+      if (folderMatch != null) {
+        final parsed = int.tryParse(folderMatch.group(1) ?? '');
+        if (parsed != null) {
+          return (i, parsed);
+        }
+      }
+    }
+    if (segments.length >= 3) {
+      for (var i = segments.length - 2; i >= 1; i--) {
+        final trimmed = segments[i].trim();
+        if (_numericFolderPattern.hasMatch(trimmed)) {
+          final parsed = int.tryParse(trimmed);
+          if (parsed != null) {
+            return (i, parsed);
+          }
+        }
+      }
+    }
+    return null;
   }
 
   static ParsedMovie parseMovie(String filePath, String rootFolderPath) {
@@ -169,24 +243,34 @@ class MediaParser {
     );
   }
 
-  static String _resolveSeriesTitle(List<String> segments, String baseName) {
-    if (segments.length >= 3) {
-      final candidate = _cleanTitle(segments[0]);
+  static String _resolveSeriesTitle(
+    List<String> segments,
+    String baseName,
+    Match? episodeMatch,
+    int? seasonFolderIndex,
+  ) {
+    final startIdx = (seasonFolderIndex != null && seasonFolderIndex >= 1)
+        ? seasonFolderIndex - 1
+        : segments.length - 2;
+    for (var i = startIdx; i >= 0; i--) {
+      final segment = segments[i];
+      if (isNonSeriesSubfolder(segment)) {
+        continue;
+      }
+      final candidate = _cleanTitle(segment);
       if (candidate.isNotEmpty) {
         return candidate;
       }
     }
-    if (segments.length == 2) {
-      final folder = segments[0];
-      if (!_seasonFolderPattern.hasMatch(folder)) {
-        final candidate = _cleanTitle(folder);
-        if (candidate.isNotEmpty) {
-          return candidate;
-        }
+    if (episodeMatch != null && episodeMatch.start > 0) {
+      final beforeEpisode = baseName.substring(0, episodeMatch.start);
+      final cleaned =
+          _cleanTitle(beforeEpisode.replaceFirst(RegExp(r'[\s._\-–—:]+$'), ''));
+      if (cleaned.isNotEmpty) {
+        return cleaned;
       }
     }
-    final beforeEpisode = baseName.split(_sxxExxPattern).first;
-    final cleaned = _cleanTitle(beforeEpisode);
+    final cleaned = _cleanTitle(baseName);
     return cleaned.isEmpty ? baseName : cleaned;
   }
 

@@ -51,6 +51,72 @@ void main() {
       expect(epParsed.episodeNumber, 4);
     });
 
+    test('parses underscore, German Folge/Staffel, and leading-number episodes',
+        () {
+      const root = r'D:\NAS\Medien';
+
+      final underscoreEp = MediaParser.parseEpisode(
+        p.join(root, 'Serien', 'Dark', 'Staffel 01', 'Dark_Ep01_Pilot.mkv'),
+        root,
+      );
+      expect(underscoreEp, isNotNull);
+      expect(underscoreEp!.seriesTitle, 'Dark');
+      expect(underscoreEp.seasonNumber, 1);
+      expect(underscoreEp.episodeNumber, 1);
+      expect(underscoreEp.episodeTitle, 'Pilot');
+
+      final folgeEp = MediaParser.parseEpisode(
+        p.join(root, 'Serien', 'Tatort', 'Folge 05 - Schatten.mp4'),
+        root,
+      );
+      expect(folgeEp, isNotNull);
+      expect(folgeEp!.seriesTitle, 'Tatort');
+      expect(folgeEp.episodeNumber, 5);
+      expect(folgeEp.episodeTitle, 'Schatten');
+
+      final leadingEp = MediaParser.parseEpisode(
+        p.join(root, 'Serien', 'Andor', 'Season 02', '03 - Erwachen.mkv'),
+        root,
+      );
+      expect(leadingEp, isNotNull);
+      expect(leadingEp!.seriesTitle, 'Andor');
+      expect(leadingEp.seasonNumber, 2);
+      expect(leadingEp.episodeNumber, 3);
+      expect(leadingEp.episodeTitle, 'Erwachen');
+
+      final dottedEp = MediaParser.parseEpisode(
+        p.join(root, 'Serien', 'Lost', '1.01 Pilotenfolge.mkv'),
+        root,
+      );
+      expect(dottedEp, isNotNull);
+      expect(dottedEp!.seriesTitle, 'Lost');
+      expect(dottedEp.seasonNumber, 1);
+      expect(dottedEp.episodeNumber, 1);
+      expect(dottedEp.episodeTitle, 'Pilotenfolge');
+
+      final numericFolderEp = MediaParser.parseEpisode(
+        p.join(root, 'Serien', 'Dark', '05', '02 - Geheimnisse.mkv'),
+        root,
+      );
+      expect(numericFolderEp, isNotNull);
+      expect(numericFolderEp!.seriesTitle, 'Dark');
+      expect(numericFolderEp.seasonNumber, 5);
+      expect(numericFolderEp.episodeNumber, 2);
+      expect(numericFolderEp.episodeTitle, 'Geheimnisse');
+
+      final epSubfolderEp = MediaParser.parseEpisode(
+        p.join(root, 'Serien', 'Dark', 'S01E05', 'video.mkv'),
+        root,
+      );
+      expect(epSubfolderEp, isNull);
+
+      final movieWithDecimal = MediaParser.parseEpisode(
+        p.join(root, 'Filme', 'Spider-Man 2.1 (2004).mkv'),
+        root,
+      );
+      expect(movieWithDecimal, isNull);
+    });
+
     test('parses movie title and release year from filename or parent folder',
         () {
       const root = r'D:\NAS\Filme';

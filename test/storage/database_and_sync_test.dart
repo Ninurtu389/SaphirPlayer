@@ -8,6 +8,7 @@ import 'package:saphir_player/core/storage/portable_paths.dart';
 import 'package:saphir_player/core/storage/progress_sync_service.dart';
 import 'package:saphir_player/core/theme/effect_mode.dart';
 import 'package:saphir_player/features/scanner/nas_scanner_service.dart';
+import 'package:saphir_player/features/stats/stats_controller.dart';
 
 void main() {
   late Directory tempRoot;
@@ -169,6 +170,62 @@ void main() {
           .first;
       expect(row['position_ms'], 45000);
       expect(row['source_device'], 'Tablet');
+    });
+
+    test('NasScannerService groups numeric season folders under single series',
+        () async {
+      final rootDir = Directory(p.join(tempRoot.path, 'Serien'));
+      final s1Dir = Directory(p.join(rootDir.path, 'Dark', '01'))
+        ..createSync(recursive: true);
+      final s5Dir = Directory(p.join(rootDir.path, 'Dark', '05'))
+        ..createSync(recursive: true);
+
+      File(p.join(s1Dir.path, '1.01 Pilot.mkv')).writeAsStringSync('v');
+      File(p.join(s5Dir.path, '5.02 Finale.mkv')).writeAsStringSync('v');
+
+      final scanner = NasScannerService(dbService);
+      final result = await scanner.scanLibrary([rootDir.path]);
+
+      expect(result.seriesCount, 1);
+      expect(result.movieCount, 0);
+
+      final seriesRows = dbService.instance.select('SELECT title FROM series;');
+      expect(seriesRows.length, 1);
+      expect(seriesRows.first['title'], 'Dark');
+    });
+
+    test('StatsController aggregates watch_history and resetDatabase clears it',
+        () {
+      final db = dbService.instance;
+      final now = DateTime.now();
+      final todayKey =
+          '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+
+      db.execute(
+        '''
+        INSERT INTO watch_history (
+          media_key, media_type, title, series_id, watched_ms, started_at, ended_at, day_key, weekday, source_device
+        ) VALUES
+          ('episode_1', 'episode', 'Dark', 1, 1800000, 1000, 1801000, ?, ?, 'PC'),
+          ('movie_1', 'movie', 'Interstellar', NULL, 3600000, 2000, 3602000, ?, ?, 'PC');
+        ''',
+        [todayKey, now.weekday, todayKey, now.weekday],
+      );
+
+      final statsController = StatsController(dbService);
+      statsController.refreshStats();
+
+      expect(statsController.summary.totalWatchMs, 5400000);
+      expect(statsController.summary.seriesWatchMs, 1800000);
+      expect(statsController.summary.movieWatchMs, 3600000);
+      expect(statsController.summary.currentStreakDays, 1);
+      expect(statsController.summary.topSeries.first.title, 'Dark');
+      expect(statsController.summary.topMovies.first.title, 'Interstellar');
+
+      dbService.resetDatabase();
+      statsController.refreshStats();
+      expect(statsController.summary.totalWatchMs, 0);
+      expect(statsController.summary.topSeries, isEmpty);
     });
   });
 }

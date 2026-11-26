@@ -142,7 +142,7 @@ class NasScannerService {
     }
 
     final db = _databaseService.instance;
-    final rows = db.select(
+    final episodeRows = db.select(
       '''
       SELECT id, file_path, duration_ms
       FROM episodes
@@ -152,27 +152,75 @@ class NasScannerService {
       [AppSpacing.maxThumbnailsPerScan],
     );
 
-    for (final row in rows) {
-      if (_isPlaybackActive) {
-        break;
-      }
-      final id = row['id'] as int;
-      final filePath = row['file_path'] as String;
-      final durationMs = row['duration_ms'] as int;
+    final remainingQuota = AppSpacing.maxThumbnailsPerScan - episodeRows.length;
+    final movieRows = remainingQuota > 0
+        ? db.select(
+            '''
+            SELECT id, file_path, duration_ms
+            FROM movies
+            WHERE thumb_path IS NULL OR thumb_path = ''
+            LIMIT ?;
+            ''',
+            [remainingQuota],
+          )
+        : const <Map<String, Object?>>[];
 
-      final thumbPath =
-          await ThumbnailGeneratorService.generateEpisodeThumbnail(
-        videoFilePath: filePath,
-        durationMs: durationMs,
-        isPlaybackActive: _isPlaybackActive,
-      );
+    if (episodeRows.isEmpty && movieRows.isEmpty) {
+      return;
+    }
 
-      if (thumbPath != null && !_isPlaybackActive) {
-        db.execute(
-          'UPDATE episodes SET thumb_path = ? WHERE id = ?;',
-          [thumbPath, id],
+    final mediaKitSession = await ThumbnailMediaKitSession.create();
+
+    try {
+      for (final row in episodeRows) {
+        if (_isPlaybackActive) {
+          break;
+        }
+        final id = row['id'] as int;
+        final filePath = row['file_path'] as String;
+        final durationMs = row['duration_ms'] as int;
+
+        final thumbPath =
+            await ThumbnailGeneratorService.generateEpisodeThumbnail(
+          videoFilePath: filePath,
+          durationMs: durationMs,
+          isPlaybackActive: _isPlaybackActive,
+          mediaKitSession: mediaKitSession,
         );
+
+        if (thumbPath != null && !_isPlaybackActive) {
+          db.execute(
+            'UPDATE episodes SET thumb_path = ? WHERE id = ?;',
+            [thumbPath, id],
+          );
+        }
       }
+
+      for (final row in movieRows) {
+        if (_isPlaybackActive) {
+          break;
+        }
+        final id = row['id'] as int;
+        final filePath = row['file_path'] as String;
+        final durationMs = row['duration_ms'] as int;
+
+        final thumbPath = await ThumbnailGeneratorService.generateThumbnail(
+          videoFilePath: filePath,
+          durationMs: durationMs,
+          isPlaybackActive: _isPlaybackActive,
+          prefix: 'mv',
+          mediaKitSession: mediaKitSession,
+        );
+
+        if (thumbPath != null && !_isPlaybackActive) {
+          db.execute(
+            'UPDATE movies SET thumb_path = ? WHERE id = ?;',
+            [thumbPath, id],
+          );
+        }
+      }
+    } finally {
+      await mediaKitSession?.dispose();
     }
   }
 
@@ -310,12 +358,12 @@ class NasScannerService {
     }
   }
 
-  static String? _findLocalPosterNearFile(String mediaFilePath) {
-    final parentDir = Directory(p.dirname(mediaFilePath));
-    if (!parentDir.existsSync()) {
+  static String? _findLocalPosterInDir(String dirPath) {
+    final dir = Directory(dirPath);
+    if (!dir.existsSync()) {
       return null;
     }
-    for (final entity in parentDir.listSync(followLinks: false)) {
+    for (final entity in dir.listSync(followLinks: false)) {
       if (entity is File && MediaParser.isImageFile(entity.path)) {
         final name = p.basenameWithoutExtension(entity.path).toLowerCase();
         if (name == 'poster' || name == 'folder' || name == 'cover') {
@@ -324,6 +372,10 @@ class NasScannerService {
       }
     }
     return null;
+  }
+
+  static String? _findLocalPosterNearFile(String mediaFilePath) {
+    return _findLocalPosterInDir(p.dirname(mediaFilePath));
   }
 
   static bool _isPathUnderAnyRoot(String filePath, List<String> roots) {
@@ -379,7 +431,10 @@ class NasScannerService {
           folderBySeries.putIfAbsent(key, () => seriesFolder);
           posterBySeries.putIfAbsent(
             key,
-            () => _findLocalPosterNearFile(filePath) ?? '',
+            () =>
+                _findLocalPosterInDir(seriesFolder) ??
+                _findLocalPosterNearFile(filePath) ??
+                '',
           );
           summaryBySeries.putIfAbsent(
             key,
@@ -431,8 +486,10 @@ class NasScannerService {
   static String _resolveSeriesRoot(String episodeFilePath, String rootPath) {
     final rel = p.relative(episodeFilePath, from: rootPath);
     final parts = p.split(rel);
-    if (parts.length >= 2) {
-      return p.join(rootPath, parts.first);
+    for (var i = parts.length - 2; i >= 0; i--) {
+      if (!MediaParser.isNonSeriesSubfolder(parts[i])) {
+        return p.joinAll([rootPath, ...parts.take(i + 1)]);
+      }
     }
     return p.dirname(episodeFilePath);
   }

@@ -197,9 +197,21 @@ class LibraryController extends ChangeNotifier {
         _statusMessage =
             '$_seriesCount ${AppStrings.seriesCountLabel} · $_movieCount ${AppStrings.moviesCountLabel}';
       }
+      await _settingsController.refreshCacheSize();
     } finally {
       _isScanning = false;
       notifyListeners();
     }
+  }
+
+  void resetLibraryState() {
+    _seriesCount = 0;
+    _movieCount = 0;
+    _seriesItems = const [];
+    _movieItems = const [];
+    _statusMessage = '';
+    _searchQuery = '';
+    _activeFilter = LibraryFilter.all;
+    notifyListeners();
   }
 }

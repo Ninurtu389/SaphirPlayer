@@ -11,6 +11,7 @@ import 'features/home/home_controller.dart';
 import 'features/player/saphir_player_controller.dart';
 import 'features/shell/shell_controller.dart';
 import 'features/shell/shell_view.dart';
+import 'features/stats/stats_controller.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -46,6 +47,9 @@ Future<void> main() async {
   final homeController = HomeController(databaseService);
   homeController.refreshHomeFeeds();
 
+  final statsController = StatsController(databaseService);
+  statsController.refreshStats();
+
   final playerController = SaphirPlayerController(
     databaseService,
     syncService,
@@ -61,6 +65,7 @@ Future<void> main() async {
       settingsController: settingsController,
       libraryController: libraryController,
       homeController: homeController,
+      statsController: statsController,
       playerController: playerController,
       syncService: syncService,
     ),
@@ -74,6 +79,7 @@ class SaphirPlayerApp extends StatelessWidget {
     required this.settingsController,
     required this.libraryController,
     required this.homeController,
+    required this.statsController,
     required this.playerController,
     required this.syncService,
   });
@@ -82,6 +88,7 @@ class SaphirPlayerApp extends StatelessWidget {
   final SettingsController settingsController;
   final LibraryController libraryController;
   final HomeController homeController;
+  final StatsController statsController;
   final SaphirPlayerController playerController;
   final ProgressSyncService syncService;
 
@@ -96,6 +103,7 @@ class SaphirPlayerApp extends StatelessWidget {
         settingsController: settingsController,
         libraryController: libraryController,
         homeController: homeController,
+        statsController: statsController,
         playerController: playerController,
         syncService: syncService,
       ),

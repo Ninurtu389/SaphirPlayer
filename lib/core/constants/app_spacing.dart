@@ -13,7 +13,14 @@ class AppSpacing {
   static const double radiusMd = 12.0;
   static const double radiusLg = 16.0;
 
-  static const double titleBarHeight = 40.0;
+  static const double titleBarHeight = 34.0;
+  static const double windowControlWidth = 34.0;
+  static const double windowControlHeight = 26.0;
+  static const double windowControlIconSize = 14.0;
+  static const double titleBarSearchHeight = 26.0;
+  static const double titleBarSearchHorizontalClearance = 148.0;
+  static const double titleBarLogoDotSize = 7.0;
+  static const double titleBarSearchFontSize = 13.0;
   static const double navRailWidth = 84.0;
   static const double navItemHeight = 56.0;
   static const double navIndicatorWidth = 3.0;
@@ -47,8 +54,16 @@ class AppSpacing {
   static const double heroBannerHeight = 360.0;
   static const double heroContentMaxWidth = 620.0;
   static const double searchBarWidth = 300.0;
+  static const double searchBarExpandedWidth = 460.0;
   static const double railArrowButtonSize = 40.0;
   static const double railScrollStep = 540.0;
+  static const double scrollEdgeTolerance = 0.5;
+
+  static const double statsCardMinWidth = 220.0;
+  static const double statsBarMaxHeight = 110.0;
+  static const double statsBarWidth = 28.0;
+  static const int statsTopListLimit = 5;
+  static const double statsMaxWidth = 1040.0;
 
   static const double seriesDetailHeaderHeight = 280.0;
   static const double episodeThumbWidth = 216.0;

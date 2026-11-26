@@ -155,7 +155,8 @@ class HomeController extends ChangeNotifier {
         s.title,
         s.poster_path,
         s.last_watched_at,
-        (SELECT e.file_path FROM episodes e WHERE e.series_id = s.id ORDER BY e.id ASC LIMIT 1) AS first_file
+        (SELECT e.file_path FROM episodes e WHERE e.series_id = s.id ORDER BY e.id ASC LIMIT 1) AS first_file,
+        (SELECT e.thumb_path FROM episodes e WHERE e.series_id = s.id AND e.thumb_path IS NOT NULL ORDER BY e.id ASC LIMIT 1) AS fallback_thumb
       FROM series s
       WHERE s.last_watched_at IS NULL OR s.last_watched_at < ?
       ORDER BY s.id DESC
@@ -172,7 +173,8 @@ class HomeController extends ChangeNotifier {
             mediaType: 'series',
             title: r['title'] as String,
             subtitle: '',
-            imagePath: r['poster_path'] as String?,
+            imagePath: (r['poster_path'] as String?) ??
+                (r['fallback_thumb'] as String?),
             progressRatio: 0.0,
             remainingMinutes: 0,
             isCompleted: false,
@@ -188,7 +190,8 @@ class HomeController extends ChangeNotifier {
         s.id,
         s.title,
         s.poster_path,
-        (SELECT e.file_path FROM episodes e WHERE e.series_id = s.id ORDER BY e.id ASC LIMIT 1) AS first_file
+        (SELECT e.file_path FROM episodes e WHERE e.series_id = s.id ORDER BY e.id ASC LIMIT 1) AS first_file,
+        (SELECT e.thumb_path FROM episodes e WHERE e.series_id = s.id AND e.thumb_path IS NOT NULL ORDER BY e.id ASC LIMIT 1) AS fallback_thumb
       FROM series s
       ORDER BY s.id DESC
       LIMIT 15;
@@ -203,7 +206,8 @@ class HomeController extends ChangeNotifier {
             mediaType: 'series',
             title: r['title'] as String,
             subtitle: '',
-            imagePath: r['poster_path'] as String?,
+            imagePath: (r['poster_path'] as String?) ??
+                (r['fallback_thumb'] as String?),
             progressRatio: 0.0,
             remainingMinutes: 0,
             isCompleted: false,

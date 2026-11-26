@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:material_ui/material_ui.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_spacing.dart';
@@ -16,6 +17,8 @@ import '../library/series_detail_view.dart';
 import '../player/playback_session.dart';
 import '../player/saphir_player_controller.dart';
 import '../player/saphir_player_view.dart';
+import '../stats/stats_controller.dart';
+import '../stats/stats_view.dart';
 import 'shell_controller.dart';
 
 class ShellView extends StatefulWidget {
@@ -25,6 +28,7 @@ class ShellView extends StatefulWidget {
     required this.settingsController,
     required this.libraryController,
     required this.homeController,
+    required this.statsController,
     required this.playerController,
     required this.syncService,
   });
@@ -33,6 +37,7 @@ class ShellView extends StatefulWidget {
   final SettingsController settingsController;
   final LibraryController libraryController;
   final HomeController homeController;
+  final StatsController statsController;
   final SaphirPlayerController playerController;
   final ProgressSyncService syncService;
 
@@ -42,17 +47,20 @@ class ShellView extends StatefulWidget {
 
 class _ShellViewState extends State<ShellView> {
   late final TextEditingController _nasInputController;
+  late final TextEditingController _globalSearchController;
   String? _statusMessage;
 
   @override
   void initState() {
     super.initState();
     _nasInputController = TextEditingController();
+    _globalSearchController = TextEditingController();
   }
 
   @override
   void dispose() {
     _nasInputController.dispose();
+    _globalSearchController.dispose();
     super.dispose();
   }
 
@@ -65,6 +73,25 @@ class _ShellViewState extends State<ShellView> {
     await widget.syncService.syncWithRoots(widget.settingsController.nasPaths);
     await widget.libraryController.refreshLibrary();
     widget.homeController.refreshHomeFeeds();
+    widget.statsController.refreshStats();
+  }
+
+  void _handleGlobalSearchChanged(String query) {
+    widget.homeController.updateSearchQuery(query);
+    widget.libraryController.updateSearchQuery(query);
+    final hasQuery = query.trim().isNotEmpty;
+    if (hasQuery &&
+        (widget.shellController.selectedSeriesDetail != null ||
+            widget.shellController.activeSection == AppSection.settings ||
+            widget.shellController.activeSection == AppSection.stats)) {
+      widget.shellController.selectSection(AppSection.library);
+    }
+    setState(() {});
+  }
+
+  void _handleClearGlobalSearch() {
+    _globalSearchController.clear();
+    _handleGlobalSearchChanged('');
   }
 
   Future<void> _handleSyncNow() async {
@@ -87,20 +114,81 @@ class _ShellViewState extends State<ShellView> {
     }
   }
 
-  void _handleAddFolder() {
+  Future<void> _handleAddFolder() async {
+    final selectedUri = await FilePicker.pickDirectory(
+      dialogTitle: AppStrings.pickFolderDialogTitle,
+    );
+    if (!mounted || selectedUri == null) {
+      return;
+    }
+    final selectedDirectory = selectedUri.isScheme('file')
+        ? selectedUri.toFilePath(windows: Platform.isWindows)
+        : selectedUri.toString();
+    if (selectedDirectory.trim().isEmpty) {
+      return;
+    }
+    _addFolderPath(selectedDirectory);
+  }
+
+  void _handleAddFolderFromInput() {
     final candidate = _nasInputController.text.trim();
     if (candidate.isEmpty) {
       return;
     }
-    final added = widget.settingsController.addNasPath(candidate);
-    if (added) {
+    if (_addFolderPath(candidate)) {
       _nasInputController.clear();
+    }
+  }
+
+  bool _addFolderPath(String path) {
+    final added = widget.settingsController.addNasPath(path);
+    setState(() {
+      _statusMessage = added
+          ? AppStrings.folderAddedStatus
+          : AppStrings.folderDuplicateStatus;
+    });
+    return added;
+  }
+
+  Future<void> _handleResetDatabase() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppColors.anthraciteSurface,
+        title: const Text(AppStrings.resetDatabaseConfirmTitle),
+        content: const Text(AppStrings.resetDatabaseConfirmMessage),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text(AppStrings.cancelAction),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.errorRed,
+              foregroundColor: AppColors.textPrimary,
+            ),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text(AppStrings.resetDatabaseConfirmAction),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) {
+      return;
+    }
+
+    await widget.settingsController.resetDatabase();
+    widget.libraryController.resetLibraryState();
+    widget.homeController.refreshHomeFeeds();
+    widget.statsController.refreshStats();
+    _nasInputController.clear();
+    _globalSearchController.clear();
+    widget.homeController.updateSearchQuery('');
+
+    if (mounted) {
       setState(() {
-        _statusMessage = AppStrings.folderAddedStatus;
-      });
-    } else {
-      setState(() {
-        _statusMessage = AppStrings.folderDuplicateStatus;
+        _statusMessage = AppStrings.databaseResetStatus;
       });
     }
   }
@@ -217,6 +305,7 @@ class _ShellViewState extends State<ShellView> {
     widget.libraryController.setPlaybackActive(false);
     widget.shellController.closePlaybackSession();
     widget.homeController.refreshHomeFeeds();
+    widget.statsController.refreshStats();
     final currentSeries = widget.shellController.selectedSeriesDetail;
     if (currentSeries != null) {
       _openSeriesById(currentSeries.seriesId);
@@ -249,13 +338,23 @@ class _ShellViewState extends State<ShellView> {
           backgroundColor: AppColors.oledBackground,
           body: Column(
             children: [
-              WindowTitleBar(shellController: widget.shellController),
+              WindowTitleBar(
+                shellController: widget.shellController,
+                searchController: _globalSearchController,
+                onSearchChanged: _handleGlobalSearchChanged,
+                onClearSearch: _handleClearGlobalSearch,
+              ),
               Expanded(
                 child: Row(
                   children: [
                     _NavigationSidebar(
                       activeSection: activeSection,
-                      onSelectSection: widget.shellController.selectSection,
+                      onSelectSection: (section) {
+                        if (section == AppSection.stats) {
+                          widget.statsController.refreshStats();
+                        }
+                        widget.shellController.selectSection(section);
+                      },
                     ),
                     Expanded(
                       child: _buildSectionContent(
@@ -289,6 +388,7 @@ class _ShellViewState extends State<ShellView> {
         onToggleWatched: (ep) {
           widget.homeController
               .toggleEpisodeWatched(ep, Platform.localHostname);
+          widget.statsController.refreshStats();
           _openSeriesById(seriesDetail.seriesId);
         },
       );
@@ -301,7 +401,6 @@ class _ShellViewState extends State<ShellView> {
           effectMode: effectMode,
           onSelectItem: _playFromCardItem,
           onOpenSeries: _openSeriesById,
-          onTriggerScan: _triggerScan,
         );
       case AppSection.library:
         return LibraryView(
@@ -309,7 +408,11 @@ class _ShellViewState extends State<ShellView> {
           effectMode: effectMode,
           onSelectItem: _playFromCardItem,
           onOpenSeries: _openSeriesById,
-          onTriggerScan: _triggerScan,
+        );
+      case AppSection.stats:
+        return StatsView(
+          statsController: widget.statsController,
+          effectMode: effectMode,
         );
       case AppSection.settings:
         return _buildSettingsView(context, effectMode);
@@ -345,7 +448,7 @@ class _ShellViewState extends State<ShellView> {
                         Expanded(
                           child: TextField(
                             controller: _nasInputController,
-                            onSubmitted: (_) => _handleAddFolder(),
+                            onSubmitted: (_) => _handleAddFolderFromInput(),
                             decoration: const InputDecoration(
                               labelText: AppStrings.nasPathLabel,
                               hintText: AppStrings.nasPathHint,
@@ -420,6 +523,30 @@ class _ShellViewState extends State<ShellView> {
                           );
                         },
                       ),
+                    const SizedBox(height: AppSpacing.md),
+                    Row(
+                      children: [
+                        ElevatedButton.icon(
+                          onPressed: widget.libraryController.isScanning
+                              ? null
+                              : _triggerScan,
+                          icon: const Icon(
+                            Icons.refresh,
+                            size: AppSpacing.iconSizeMd,
+                          ),
+                          label: const Text(AppStrings.scanButton),
+                        ),
+                        if (widget.libraryController.statusMessage.isNotEmpty) ...[
+                          const SizedBox(width: AppSpacing.md),
+                          Expanded(
+                            child: Text(
+                              widget.libraryController.statusMessage,
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -517,6 +644,18 @@ class _ShellViewState extends State<ShellView> {
                           ),
                           label: const Text(AppStrings.clearCacheButton),
                         ),
+                        OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.errorRed,
+                            side: const BorderSide(color: AppColors.errorRed),
+                          ),
+                          onPressed: _handleResetDatabase,
+                          icon: const Icon(
+                            Icons.delete_forever_outlined,
+                            size: AppSpacing.iconSizeMd,
+                          ),
+                          label: const Text(AppStrings.resetDatabaseButton),
+                        ),
                       ],
                     ),
                     if (_statusMessage != null) ...[
@@ -552,12 +691,7 @@ class _NavigationSidebar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: AppSpacing.navRailWidth,
-      decoration: const BoxDecoration(
-        color: AppColors.anthraciteSurface,
-        border: Border(
-          right: BorderSide(color: AppColors.dividerHairline),
-        ),
-      ),
+      color: AppColors.anthraciteSurface,
       child: Column(
         children: [
           const SizedBox(height: AppSpacing.md),
@@ -578,12 +712,21 @@ class _NavigationSidebar extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.xs),
           _NavRailItem(
+            icon: Icons.bar_chart_outlined,
+            selectedIcon: Icons.bar_chart,
+            label: AppStrings.statsTab,
+            selected: activeSection == AppSection.stats,
+            onTap: () => onSelectSection(AppSection.stats),
+          ),
+          const Spacer(),
+          _NavRailItem(
             icon: Icons.settings_outlined,
             selectedIcon: Icons.settings,
             label: AppStrings.settingsTab,
             selected: activeSection == AppSection.settings,
             onTap: () => onSelectSection(AppSection.settings),
           ),
+          const SizedBox(height: AppSpacing.md),
         ],
       ),
     );

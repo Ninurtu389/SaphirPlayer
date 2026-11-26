@@ -4,6 +4,7 @@ class AppStrings {
   static const String appTitle = 'SaphirPlayer';
   static const String homeTab = 'Start';
   static const String libraryTab = 'Bibliothek';
+  static const String statsTab = 'Statistiken';
   static const String settingsTab = 'Einstellungen';
 
   static const String windowMinimizeTooltip = 'Minimieren';
@@ -119,4 +120,52 @@ class AppStrings {
   static const String cacheClearedStatus = 'Thumbnail-Cache geleert';
   static const String syncNowButton = 'Sync abgleichen';
   static const String syncCompletedStatus = 'Fortschritt synchronisiert';
+  static const String pickFolderDialogTitle = 'Medienordner auswählen';
+  static const String resetDatabaseButton = 'Datenbank zurücksetzen';
+  static const String resetDatabaseConfirmTitle = 'Datenbank zurücksetzen?';
+  static const String resetDatabaseConfirmMessage =
+      'Alle eingelesenen Serien, Filme, Fortschritte und Einstellungen werden unwiderruflich aus der lokalen Datenbank gelöscht.';
+  static const String resetDatabaseConfirmAction = 'Zurücksetzen';
+  static const String cancelAction = 'Abbrechen';
+  static const String databaseResetStatus = 'Datenbank wurde zurückgesetzt';
+  static const String clearSearchTooltip = 'Suche leeren';
+
+  static const String statsPageTitle = 'Statistiken';
+  static const String statsTotalWatchtimeTitle = 'Gesamte Watchtime';
+  static const String statsSeriesWatchtimeLabel = 'Serien';
+  static const String statsMoviesWatchtimeLabel = 'Filme';
+  static const String statsTopDayTitle = 'Aktivster Tag';
+  static const String statsTopWeekdayTitle = 'Aktivster Wochentag';
+  static const String statsStreakTitle = 'Watch-Streak';
+  static const String statsStreakDaysSuffix = 'Tage';
+  static const String statsStreakBestPrefix = 'Rekord:';
+  static const String statsCompletedTitle = 'Abgeschlossen';
+  static const String statsWeekdayChartTitle = 'Watchtime nach Wochentag';
+  static const String statsTopSeriesTitle = 'Meistgesehene Serien';
+  static const String statsTopMoviesTitle = 'Meistgesehene Filme';
+  static const String statsEmptyMessage =
+      'Noch keine Wiedergabedaten vorhanden. Starte eine Folge oder einen Film, um Statistiken zu sammeln.';
+  static const String statsNoDataDash = '–';
+  static const String statsHoursShort = 'Std.';
+  static const String statsMinutesShort = 'Min.';
+  static const String statsDaysShort = 'Tage';
+  static const String statsPlaysSuffix = '× geschaut';
+  static const List<String> statsWeekdayLabels = [
+    'Mo',
+    'Di',
+    'Mi',
+    'Do',
+    'Fr',
+    'Sa',
+    'So',
+  ];
+  static const List<String> statsWeekdayFullNames = [
+    'Montag',
+    'Dienstag',
+    'Mittwoch',
+    'Donnerstag',
+    'Freitag',
+    'Samstag',
+    'Sonntag',
+  ];
 }

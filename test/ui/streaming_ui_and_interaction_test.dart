@@ -15,7 +15,11 @@ import 'package:saphir_player/features/home/home_view.dart';
 import 'package:saphir_player/features/library/library_models.dart';
 import 'package:saphir_player/features/library/library_view.dart';
 import 'package:saphir_player/features/library/series_detail_view.dart';
+import 'package:saphir_player/features/shell/shell_controller.dart';
+import 'package:saphir_player/features/stats/stats_controller.dart';
+import 'package:saphir_player/features/stats/stats_view.dart';
 import 'package:saphir_player/widgets/media_tile.dart';
+import 'package:saphir_player/widgets/window_title_bar.dart';
 
 void main() {
   late Directory tempRoot;
@@ -76,7 +80,6 @@ void main() {
             effectMode: EffectMode.glass,
             onSelectItem: (item) => playedItem = item,
             onOpenSeries: (id) => openedSeriesId = id,
-            onTriggerScan: () {},
           ),
         ),
       );
@@ -109,7 +112,6 @@ void main() {
             effectMode: EffectMode.lean,
             onSelectItem: (item) => selectedMovie = item,
             onOpenSeries: (id) => openedSeriesId = id,
-            onTriggerScan: () {},
           ),
         ),
       );
@@ -117,6 +119,7 @@ void main() {
 
       expect(find.text('Dark'), findsOneWidget);
       expect(find.text('Interstellar'), findsOneWidget);
+      expect(find.text(AppStrings.libraryOverviewTitle), findsNothing);
 
       await tester.tap(find.text(AppStrings.filterMoviesLabel));
       await tester.pumpAndSettle();
@@ -204,6 +207,77 @@ void main() {
     await tester.tap(find.byTooltip(AppStrings.toggleWatchedAction).first);
     expect(toggledEp, isNotNull);
     expect(toggledEp!.episodeNumber, 1);
+  });
+
+  testWidgets('HomeView hides scroll arrows when rail fits without scrolling',
+      (tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+
+    await tester.pumpWidget(
+      wrapWithApp(
+        HomeView(
+          homeController: homeController,
+          effectMode: EffectMode.glass,
+          onSelectItem: (_) {},
+          onOpenSeries: (_) {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await gesture.addPointer(location: Offset.zero);
+    addTearDown(gesture.removePointer);
+    await gesture.moveTo(tester.getCenter(find.byType(MediaTile).first));
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip(AppStrings.scrollLeftTooltip), findsNothing);
+    expect(find.byTooltip(AppStrings.scrollRightTooltip), findsNothing);
+  });
+
+  testWidgets('StatsView and WindowTitleBar render cleanly at 1280x800 and 800x500',
+      (tester) async {
+    final statsController = StatsController(dbService);
+    statsController.refreshStats();
+    final shellController = ShellController();
+    final searchController = TextEditingController();
+    addTearDown(searchController.dispose);
+
+    for (final size in [const Size(1280, 800), const Size(800, 500)]) {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.buildDarkTheme(),
+          home: Scaffold(
+            body: Column(
+              children: [
+                WindowTitleBar(
+                  shellController: shellController,
+                  searchController: searchController,
+                  onSearchChanged: (_) {},
+                  onClearSearch: () {},
+                ),
+                Expanded(
+                  child: StatsView(
+                    statsController: statsController,
+                    effectMode: EffectMode.glass,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text(AppStrings.statsPageTitle), findsOneWidget);
+      expect(find.byIcon(Icons.search), findsOneWidget);
+    }
   });
 }
 

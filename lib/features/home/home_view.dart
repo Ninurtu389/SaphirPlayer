@@ -15,14 +15,12 @@ class HomeView extends StatelessWidget {
     required this.effectMode,
     required this.onSelectItem,
     required this.onOpenSeries,
-    required this.onTriggerScan,
   });
 
   final HomeController homeController;
   final EffectMode effectMode;
   final ValueChanged<MediaCardItem> onSelectItem;
   final ValueChanged<int> onOpenSeries;
-  final VoidCallback onTriggerScan;
 
   @override
   Widget build(BuildContext context) {
@@ -37,99 +35,57 @@ class HomeView extends StatelessWidget {
             homeController.seriesItems.isNotEmpty ||
             homeController.movieItems.isNotEmpty;
 
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.lg,
-                vertical: AppSpacing.sm,
-              ),
-              child: Row(
+        return !hasAnyContent
+            ? Center(
+                child: Text(
+                  AppStrings.emptyHomeMessage,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              )
+            : ListView(
+                padding: const EdgeInsets.only(bottom: AppSpacing.xl),
                 children: [
-                  Text(
-                    AppStrings.homeTab,
-                    style: Theme.of(context).textTheme.headlineMedium,
+                  if (hero != null) ...[
+                    _buildHeroBanner(context, hero),
+                    const SizedBox(height: AppSpacing.lg),
+                  ],
+                  _MediaRail(
+                    title: AppStrings.continueWatchingTitle,
+                    items: homeController.continueWatching,
+                    effectMode: effectMode,
+                    onSelectItem: onSelectItem,
+                    onOpenSeries: onOpenSeries,
                   ),
-                  const Spacer(),
-                  SizedBox(
-                    width: AppSpacing.searchBarWidth,
-                    child: TextField(
-                      onChanged: homeController.updateSearchQuery,
-                      decoration: const InputDecoration(
-                        hintText: AppStrings.searchHint,
-                        prefixIcon: Icon(
-                          Icons.search,
-                          size: AppSpacing.iconSizeMd,
-                        ),
-                        isDense: true,
-                      ),
-                    ),
+                  _MediaRail(
+                    title: AppStrings.recentlyAddedTitle,
+                    items: homeController.recentlyAdded,
+                    effectMode: effectMode,
+                    onSelectItem: onSelectItem,
+                    onOpenSeries: onOpenSeries,
                   ),
-                  const SizedBox(width: AppSpacing.xs),
-                  IconButton(
-                    tooltip: AppStrings.scanButton,
-                    onPressed: onTriggerScan,
-                    icon: const Icon(Icons.refresh),
+                  _MediaRail(
+                    title: AppStrings.rediscoverTitle,
+                    items: homeController.rediscoverItems,
+                    effectMode: effectMode,
+                    onSelectItem: onSelectItem,
+                    onOpenSeries: onOpenSeries,
+                  ),
+                  _MediaRail(
+                    title: AppStrings.seriesCountLabel,
+                    items: homeController.seriesItems,
+                    effectMode: effectMode,
+                    onSelectItem: onSelectItem,
+                    onOpenSeries: onOpenSeries,
+                  ),
+                  _MediaRail(
+                    title: AppStrings.moviesCountLabel,
+                    items: homeController.movieItems,
+                    effectMode: effectMode,
+                    onSelectItem: onSelectItem,
+                    onOpenSeries: onOpenSeries,
                   ),
                 ],
-              ),
-            ),
-            Expanded(
-              child: !hasAnyContent
-                  ? Center(
-                      child: Text(
-                        AppStrings.emptyHomeMessage,
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    )
-                  : ListView(
-                      padding: const EdgeInsets.only(bottom: AppSpacing.xl),
-                      children: [
-                        if (hero != null) ...[
-                          _buildHeroBanner(context, hero),
-                          const SizedBox(height: AppSpacing.lg),
-                        ],
-                        _MediaRail(
-                          title: AppStrings.continueWatchingTitle,
-                          items: homeController.continueWatching,
-                          effectMode: effectMode,
-                          onSelectItem: onSelectItem,
-                          onOpenSeries: onOpenSeries,
-                        ),
-                        _MediaRail(
-                          title: AppStrings.recentlyAddedTitle,
-                          items: homeController.recentlyAdded,
-                          effectMode: effectMode,
-                          onSelectItem: onSelectItem,
-                          onOpenSeries: onOpenSeries,
-                        ),
-                        _MediaRail(
-                          title: AppStrings.rediscoverTitle,
-                          items: homeController.rediscoverItems,
-                          effectMode: effectMode,
-                          onSelectItem: onSelectItem,
-                          onOpenSeries: onOpenSeries,
-                        ),
-                        _MediaRail(
-                          title: AppStrings.seriesCountLabel,
-                          items: homeController.seriesItems,
-                          effectMode: effectMode,
-                          onSelectItem: onSelectItem,
-                          onOpenSeries: onOpenSeries,
-                        ),
-                        _MediaRail(
-                          title: AppStrings.moviesCountLabel,
-                          items: homeController.movieItems,
-                          effectMode: effectMode,
-                          onSelectItem: onSelectItem,
-                          onOpenSeries: onOpenSeries,
-                        ),
-                      ],
-                    ),
-            ),
-          ],
-        );
+              );
       },
     );
   }
@@ -320,11 +276,49 @@ class _MediaRail extends StatefulWidget {
 class _MediaRailState extends State<_MediaRail> {
   final ScrollController _scrollController = ScrollController();
   bool _isHovered = false;
+  bool _canScrollLeft = false;
+  bool _canScrollRight = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_updateScrollIndicators);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _updateScrollIndicators();
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _MediaRail oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.items.length != widget.items.length) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _updateScrollIndicators();
+      });
+    }
+  }
 
   @override
   void dispose() {
+    _scrollController.removeListener(_updateScrollIndicators);
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _updateScrollIndicators() {
+    if (!mounted || !_scrollController.hasClients) {
+      return;
+    }
+    final pos = _scrollController.position;
+    final nextLeft = pos.pixels > AppSpacing.scrollEdgeTolerance;
+    final nextRight = pos.maxScrollExtent > AppSpacing.scrollEdgeTolerance &&
+        pos.pixels < pos.maxScrollExtent - AppSpacing.scrollEdgeTolerance;
+    if (nextLeft != _canScrollLeft || nextRight != _canScrollRight) {
+      setState(() {
+        _canScrollLeft = nextLeft;
+        _canScrollRight = nextRight;
+      });
+    }
   }
 
   void _scrollBy(double delta) {
@@ -370,33 +364,39 @@ class _MediaRailState extends State<_MediaRail> {
               height: AppSpacing.tileRailHeight,
               child: Stack(
                 children: [
-                  ListView.separated(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.lg,
-                      vertical: AppSpacing.xs,
-                    ),
-                    scrollDirection: Axis.horizontal,
-                    itemCount: widget.items.length,
-                    separatorBuilder: (context, index) =>
-                        const SizedBox(width: AppSpacing.railSpacing),
-                    itemBuilder: (context, index) {
-                      final item = widget.items[index];
-                      return MediaTile(
-                        item: item,
-                        effectMode: widget.effectMode,
-                        onTap: () {
-                          if (item.mediaType == 'series' &&
-                              item.seriesId != null) {
-                            widget.onOpenSeries(item.seriesId!);
-                          } else {
-                            widget.onSelectItem(item);
-                          }
-                        },
-                      );
+                  NotificationListener<ScrollMetricsNotification>(
+                    onNotification: (_) {
+                      _updateScrollIndicators();
+                      return false;
                     },
+                    child: ListView.separated(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.lg,
+                        vertical: AppSpacing.xs,
+                      ),
+                      scrollDirection: Axis.horizontal,
+                      itemCount: widget.items.length,
+                      separatorBuilder: (context, index) =>
+                          const SizedBox(width: AppSpacing.railSpacing),
+                      itemBuilder: (context, index) {
+                        final item = widget.items[index];
+                        return MediaTile(
+                          item: item,
+                          effectMode: widget.effectMode,
+                          onTap: () {
+                            if (item.mediaType == 'series' &&
+                                item.seriesId != null) {
+                              widget.onOpenSeries(item.seriesId!);
+                            } else {
+                              widget.onSelectItem(item);
+                            }
+                          },
+                        );
+                      },
+                    ),
                   ),
-                  if (_isHovered)
+                  if (_isHovered && _canScrollLeft)
                     Positioned(
                       left: AppSpacing.sm,
                       top: 0,
@@ -409,7 +409,7 @@ class _MediaRailState extends State<_MediaRail> {
                         ),
                       ),
                     ),
-                  if (_isHovered)
+                  if (_isHovered && _canScrollRight)
                     Positioned(
                       right: AppSpacing.sm,
                       top: 0,

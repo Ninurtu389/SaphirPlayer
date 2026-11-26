@@ -13,14 +13,12 @@ class LibraryView extends StatelessWidget {
     required this.effectMode,
     required this.onSelectItem,
     required this.onOpenSeries,
-    required this.onTriggerScan,
   });
 
   final LibraryController libraryController;
   final EffectMode effectMode;
   final ValueChanged<MediaCardItem> onSelectItem;
   final ValueChanged<int> onOpenSeries;
-  final VoidCallback onTriggerScan;
 
   @override
   Widget build(BuildContext context) {
@@ -35,58 +33,6 @@ class LibraryView extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          AppStrings.libraryOverviewTitle,
-                          style: Theme.of(context).textTheme.headlineMedium,
-                        ),
-                        const SizedBox(height: AppSpacing.xxs),
-                        Text(
-                          '${libraryController.seriesCount} ${AppStrings.seriesCountLabel} · ${libraryController.movieCount} ${AppStrings.moviesCountLabel}',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ],
-                    ),
-                  ),
-                  SizedBox(
-                    width: AppSpacing.searchBarWidth,
-                    child: TextField(
-                      onChanged: libraryController.updateSearchQuery,
-                      decoration: const InputDecoration(
-                        hintText: AppStrings.searchHint,
-                        prefixIcon: Icon(
-                          Icons.search,
-                          size: AppSpacing.iconSizeMd,
-                        ),
-                        isDense: true,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: AppSpacing.sm),
-                  ElevatedButton.icon(
-                    onPressed:
-                        libraryController.isScanning ? null : onTriggerScan,
-                    icon: const Icon(
-                      Icons.refresh,
-                      size: AppSpacing.iconSizeMd,
-                    ),
-                    label: const Text(AppStrings.scanButton),
-                  ),
-                ],
-              ),
-              if (libraryController.statusMessage.isNotEmpty) ...[
-                const SizedBox(height: AppSpacing.xs),
-                Text(
-                  libraryController.statusMessage,
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
-              const SizedBox(height: AppSpacing.md),
               SegmentedButton<LibraryFilter>(
                 segments: const [
                   ButtonSegment<LibraryFilter>(

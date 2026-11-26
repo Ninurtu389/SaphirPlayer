@@ -224,4 +224,13 @@ class SettingsController extends ChangeNotifier {
 
     notifyListeners();
   }
+
+  Future<void> resetDatabase() async {
+    _databaseService.resetDatabase();
+    _nasPaths = [];
+    _effectMode = EffectMode.glass;
+    _perDeviceEffect = true;
+    await clearThumbnailCache();
+    notifyListeners();
+  }
 }
