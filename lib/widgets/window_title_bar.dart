@@ -24,11 +24,11 @@ class WindowTitleBar extends StatelessWidget {
           onDoubleTap: shellController.toggleMaximizeWindow,
           child: Container(
             height: AppSpacing.titleBarHeight,
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
             decoration: const BoxDecoration(
               color: AppColors.anthraciteSurface,
               border: Border(
-                bottom: BorderSide(color: AppColors.borderSubtle),
+                bottom: BorderSide(color: AppColors.dividerHairline),
               ),
             ),
             child: Row(
@@ -48,14 +48,14 @@ class WindowTitleBar extends StatelessWidget {
                 ),
                 const Spacer(),
                 IconButton(
-                  tooltip: 'Minimieren',
+                  tooltip: AppStrings.windowMinimizeTooltip,
                   onPressed: shellController.minimizeWindow,
                   icon: const Icon(Icons.remove, size: AppSpacing.md),
                 ),
                 IconButton(
                   tooltip: shellController.isMaximized
-                      ? 'Wiederherstellen'
-                      : 'Maximieren',
+                      ? AppStrings.windowRestoreTooltip
+                      : AppStrings.windowMaximizeTooltip,
                   onPressed: shellController.toggleMaximizeWindow,
                   icon: Icon(
                     shellController.isMaximized
@@ -65,7 +65,7 @@ class WindowTitleBar extends StatelessWidget {
                   ),
                 ),
                 IconButton(
-                  tooltip: 'Schliessen',
+                  tooltip: AppStrings.windowCloseTooltip,
                   onPressed: shellController.closeWindow,
                   icon: const Icon(Icons.close, size: AppSpacing.md),
                 ),

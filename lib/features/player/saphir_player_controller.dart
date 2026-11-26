@@ -50,6 +50,8 @@ class SaphirPlayerController extends ChangeNotifier {
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   double _volume = 100.0;
+  double _volumeBeforeMute = 100.0;
+  double _playbackSpeed = 1.0;
   List<AudioTrack> _audioTracks = const [];
   List<SubtitleTrack> _subtitleTracks = const [];
   AudioTrack _activeAudioTrack = AudioTrack.auto();
@@ -90,6 +92,8 @@ class SaphirPlayerController extends ChangeNotifier {
   Duration get position => _position;
   Duration get duration => _duration;
   double get volume => _volume;
+  bool get isMuted => _volume <= AppSpacing.volumeMin;
+  double get playbackSpeed => _playbackSpeed;
   List<AudioTrack> get audioTracks => _audioTracks;
   List<SubtitleTrack> get subtitleTracks => _subtitleTracks;
   AudioTrack get activeAudioTrack => _activeAudioTrack;
@@ -330,6 +334,26 @@ class SaphirPlayerController extends ChangeNotifier {
     final next =
         (_volume + delta).clamp(AppSpacing.volumeMin, AppSpacing.volumeMax);
     await _player.setVolume(next);
+  }
+
+  Future<void> toggleMute() async {
+    registerUserActivity();
+    if (isMuted) {
+      final restored = _volumeBeforeMute > AppSpacing.volumeMin
+          ? _volumeBeforeMute
+          : AppSpacing.volumeMax;
+      await _player.setVolume(restored);
+    } else {
+      _volumeBeforeMute = _volume;
+      await _player.setVolume(AppSpacing.volumeMin);
+    }
+  }
+
+  Future<void> setPlaybackSpeed(double speed) async {
+    registerUserActivity();
+    _playbackSpeed = speed;
+    await _player.setRate(speed);
+    notifyListeners();
   }
 
   Future<void> playNextEpisode() async {

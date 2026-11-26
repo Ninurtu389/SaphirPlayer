@@ -28,6 +28,21 @@ class MediaCardItem {
   final bool isCompleted;
   final int? seriesId;
   final String filePath;
+
+  String get monogram {
+    final words = title
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((w) => w.isNotEmpty)
+        .toList();
+    if (words.isEmpty) {
+      return '?';
+    }
+    if (words.length == 1) {
+      return words.first.substring(0, words.first.length >= 2 ? 2 : 1).toUpperCase();
+    }
+    return '${words[0][0]}${words[1][0]}'.toUpperCase();
+  }
 }
 
 class SeasonGroup {
@@ -79,6 +94,14 @@ class EpisodeEntry {
     final ratio = positionMs / durationMs;
     return ratio.clamp(0.0, 1.0);
   }
+
+  String get formattedDuration {
+    if (durationMs <= 0) {
+      return '';
+    }
+    final minutes = (durationMs / 60000).round();
+    return '$minutes Min.';
+  }
 }
 
 class SeriesDetailData {
@@ -123,5 +146,22 @@ class SeriesDetailData {
       return 0.0;
     }
     return (watchedEpisodes / totalEpisodes).clamp(0.0, 1.0);
+  }
+
+  EpisodeEntry? get nextResumeEpisode {
+    EpisodeEntry? firstUnwatched;
+    EpisodeEntry? firstAny;
+    for (final season in seasons) {
+      for (final ep in season.episodes) {
+        firstAny ??= ep;
+        if (ep.positionMs > 0 && !ep.isCompleted) {
+          return ep;
+        }
+        if (!ep.isCompleted) {
+          firstUnwatched ??= ep;
+        }
+      }
+    }
+    return firstUnwatched ?? firstAny;
   }
 }

@@ -13,12 +13,14 @@ class MediaTile extends StatefulWidget {
     required this.effectMode,
     required this.onTap,
     this.width = AppSpacing.tileCardWidth,
+    this.height = AppSpacing.tileCardHeight,
   });
 
   final MediaCardItem item;
   final EffectMode effectMode;
   final VoidCallback onTap;
   final double width;
+  final double height;
 
   @override
   State<MediaTile> createState() => _MediaTileState();
@@ -26,6 +28,9 @@ class MediaTile extends StatefulWidget {
 
 class _MediaTileState extends State<MediaTile> {
   bool _isHovered = false;
+  bool _isFocused = false;
+
+  bool get _isActive => _isHovered || _isFocused;
 
   @override
   Widget build(BuildContext context) {
@@ -37,19 +42,19 @@ class _MediaTileState extends State<MediaTile> {
     final hasImage =
         item.imagePath != null && File(item.imagePath!).existsSync();
 
-    final borderColor = _isHovered
+    final borderColor = _isActive
         ? (isGlass ? AppColors.sapphireHoverBorder : AppColors.sapphireBright)
-        : AppColors.borderSubtle;
+        : AppColors.borderTransparent;
 
-    final borderWidth = _isHovered
+    final borderWidth = _isActive
         ? AppSpacing.tileBorderWidthHover
         : AppSpacing.tileBorderWidthDefault;
 
-    final scale = (isGlass && _isHovered)
+    final scale = (isGlass && _isActive)
         ? AppSpacing.tileHoverScale
         : AppSpacing.tileRestScale;
 
-    final shadows = (isGlass && _isHovered)
+    final shadows = (isGlass && _isActive)
         ? const [
             BoxShadow(
               color: AppColors.sapphireHoverShadow,
@@ -58,181 +63,153 @@ class _MediaTileState extends State<MediaTile> {
           ]
         : const <BoxShadow>[];
 
-    final cardContent = AnimatedContainer(
-      duration: animDuration,
-      curve: Curves.easeOutCubic,
-      width: widget.width,
+    final radius = BorderRadius.circular(AppSpacing.radiusMd);
+
+    final tileBody = Container(
       decoration: BoxDecoration(
-        color: AppColors.anthraciteSurface,
-        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        color: _isActive && !isGlass
+            ? AppColors.surfaceHover
+            : AppColors.anthraciteSurface,
+        borderRadius: radius,
         border: Border.all(
           color: borderColor,
           width: borderWidth,
         ),
         boxShadow: shadows,
       ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-        onTap: widget.onTap,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(
-              height: AppSpacing.tilePosterHeight,
-              width: double.infinity,
-              child: ClipRRect(
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(AppSpacing.radiusMd),
-                ),
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    if (hasImage)
-                      Image.file(
-                        File(item.imagePath!),
-                        fit: BoxFit.cover,
-                        cacheWidth: AppSpacing.thumbWidth.toInt(),
-                        cacheHeight: AppSpacing.thumbHeight.toInt(),
-                      )
-                    else
-                      Container(
-                        color: AppColors.elevatedSurface,
-                        alignment: Alignment.center,
-                        child: Icon(
-                          Icons.play_circle_outline,
-                          color: _isHovered
-                              ? AppColors.sapphireBright
-                              : AppColors.textSecondary,
-                          size: AppSpacing.xl,
-                        ),
-                      ),
-                    const DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            AppColors.cardGradientTop,
-                            AppColors.cardGradientBottom,
-                          ],
-                        ),
-                      ),
-                    ),
-                    if (_isHovered)
-                      Center(
-                        child: Container(
-                          padding: const EdgeInsets.all(AppSpacing.xs),
-                          decoration: const BoxDecoration(
-                            color: AppColors.badgeBackground,
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(
-                            Icons.play_arrow,
-                            color: AppColors.textPrimary,
-                            size: AppSpacing.iconSizeLg,
-                          ),
-                        ),
-                      ),
-                    if (item.isCompleted)
-                      Positioned(
-                        top: AppSpacing.xs,
-                        right: AppSpacing.xs,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: AppSpacing.xs,
-                            vertical: AppSpacing.xxs,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppColors.badgeBackground,
-                            borderRadius:
-                                BorderRadius.circular(AppSpacing.radiusSm),
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.check_circle,
-                                color: AppColors.successGreen,
-                                size: AppSpacing.iconSizeSm,
-                              ),
-                              SizedBox(width: AppSpacing.xxs),
-                              Text(
-                                AppStrings.watchedBadge,
-                                style: TextStyle(
-                                  fontSize: AppSpacing.sm,
-                                  color: AppColors.textPrimary,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    if (item.remainingMinutes > 0 && !item.isCompleted)
-                      Positioned(
-                        right: AppSpacing.xs,
-                        bottom: AppSpacing.xs,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: AppSpacing.xs,
-                            vertical: AppSpacing.xxs,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppColors.badgeBackground,
-                            borderRadius:
-                                BorderRadius.circular(AppSpacing.radiusSm),
-                          ),
-                          child: Text(
-                            '${item.remainingMinutes} ${AppStrings.remainingMinutesSuffix}',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ),
-                      ),
-                    if (item.progressRatio > 0 && !item.isCompleted)
-                      Positioned(
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        child: LinearProgressIndicator(
-                          value: item.progressRatio,
-                          minHeight: AppSpacing.progressBarHeight,
-                          backgroundColor: AppColors.progressTrack,
-                          valueColor: const AlwaysStoppedAnimation<Color>(
-                            AppColors.sapphireBright,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(AppSpacing.sm),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    item.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleMedium,
+      child: ClipRRect(
+        borderRadius: radius,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: widget.onTap,
+            onFocusChange: (focused) => setState(() => _isFocused = focused),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if (hasImage)
+                  Image.file(
+                    File(item.imagePath!),
+                    fit: BoxFit.cover,
+                    cacheWidth: AppSpacing.thumbWidth.toInt(),
+                    cacheHeight: AppSpacing.thumbHeight.toInt(),
+                  )
+                else
+                  _CoverFallback(title: item.title, monogram: item.monogram),
+                const DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: AppColors.cardOverlayGradient,
                   ),
-                  if (item.subtitle.isNotEmpty) ...[
-                    const SizedBox(height: AppSpacing.xxs),
-                    Text(
-                      item.subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall,
+                ),
+                if (_isActive)
+                  Center(
+                    child: Container(
+                      padding: const EdgeInsets.all(AppSpacing.xs),
+                      decoration: const BoxDecoration(
+                        color: AppColors.badgeBackground,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.play_arrow,
+                        color: AppColors.textPrimary,
+                        size: AppSpacing.iconSizeLg,
+                      ),
                     ),
-                  ],
-                ],
-              ),
+                  ),
+                if (item.isCompleted)
+                  Positioned(
+                    top: AppSpacing.xs,
+                    right: AppSpacing.xs,
+                    child: Container(
+                      padding: const EdgeInsets.all(AppSpacing.xxs),
+                      decoration: const BoxDecoration(
+                        color: AppColors.badgeBackground,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.check_circle,
+                        color: AppColors.successGreen,
+                        size: AppSpacing.iconSizeSm,
+                      ),
+                    ),
+                  ),
+                if (item.remainingMinutes > 0 && !item.isCompleted)
+                  Positioned(
+                    top: AppSpacing.xs,
+                    left: AppSpacing.xs,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.xs,
+                        vertical: AppSpacing.xxs,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.badgeBackground,
+                        borderRadius:
+                            BorderRadius.circular(AppSpacing.radiusSm),
+                      ),
+                      child: Text(
+                        '${item.remainingMinutes} ${AppStrings.remainingMinutesSuffix}',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ),
+                  ),
+                Positioned(
+                  left: AppSpacing.sm,
+                  right: AppSpacing.sm,
+                  bottom: AppSpacing.sm,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        item.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      if (item.subtitle.isNotEmpty) ...[
+                        const SizedBox(height: AppSpacing.xxs),
+                        Text(
+                          item.subtitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                if (item.progressRatio > 0 && !item.isCompleted)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: LinearProgressIndicator(
+                      value: item.progressRatio,
+                      minHeight: AppSpacing.progressBarHeight,
+                      backgroundColor: AppColors.progressTrack,
+                      valueColor: const AlwaysStoppedAnimation<Color>(
+                        AppColors.sapphireBright,
+                      ),
+                    ),
+                  ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
+
+    final sizedTile = widget.width.isFinite
+        ? SizedBox(
+            width: widget.width,
+            height: widget.height,
+            child: tileBody,
+          )
+        : AspectRatio(
+            aspectRatio: AppSpacing.thumbWidth / AppSpacing.thumbHeight,
+            child: tileBody,
+          );
 
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
@@ -242,9 +219,44 @@ class _MediaTileState extends State<MediaTile> {
               scale: scale,
               duration: animDuration,
               curve: Curves.easeOutCubic,
-              child: cardContent,
+              child: sizedTile,
             )
-          : cardContent,
+          : sizedTile,
+    );
+  }
+}
+
+class _CoverFallback extends StatelessWidget {
+  const _CoverFallback({
+    required this.title,
+    required this.monogram,
+  });
+
+  final String title;
+  final String monogram;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppColors.coverGradientForTitle(title);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: colors,
+        ),
+      ),
+      child: Center(
+        child: Text(
+          monogram,
+          style: const TextStyle(
+            fontSize: AppSpacing.monogramFontSize,
+            fontWeight: FontWeight.w800,
+            color: AppColors.dividerHairline,
+            letterSpacing: 2.0,
+          ),
+        ),
+      ),
     );
   }
 }

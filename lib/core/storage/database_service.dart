@@ -4,12 +4,12 @@ import 'portable_paths.dart';
 class DatabaseService {
   Database? _db;
 
-  Future<void> open() async {
+  Future<void> open({String? dbPath}) async {
     if (_db != null) {
       return;
     }
-    final dbPath = await PortablePaths.getDatabaseFilePath();
-    final db = sqlite3.open(dbPath);
+    final resolvedPath = dbPath ?? await PortablePaths.getDatabaseFilePath();
+    final db = sqlite3.open(resolvedPath);
     db.execute('PRAGMA journal_mode = WAL;');
     db.execute('PRAGMA synchronous = NORMAL;');
     db.execute('PRAGMA foreign_keys = ON;');

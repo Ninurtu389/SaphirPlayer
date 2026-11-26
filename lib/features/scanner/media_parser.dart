@@ -54,7 +54,7 @@ class MediaParser {
   );
 
   static final RegExp _xPattern = RegExp(
-    r'\b(\d{1,2})x(\d{1,3})\b',
+    r'(?<![a-zA-Z0-9])(\d{1,2})x(\d{1,3})(?![a-zA-Z0-9])',
   );
 
   static final RegExp _exxPattern = RegExp(

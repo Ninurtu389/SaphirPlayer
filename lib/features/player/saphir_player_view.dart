@@ -28,6 +28,7 @@ class SaphirPlayerView extends StatefulWidget {
 
 class _SaphirPlayerViewState extends State<SaphirPlayerView> {
   final FocusNode _focusNode = FocusNode();
+  bool _isSeekHovered = false;
 
   @override
   void initState() {
@@ -107,6 +108,8 @@ class _SaphirPlayerViewState extends State<SaphirPlayerView> {
 
   @override
   Widget build(BuildContext context) {
+    final isGlass = widget.effectMode == EffectMode.glass;
+
     return ListenableBuilder(
       listenable: widget.controller,
       builder: (context, _) {
@@ -116,6 +119,214 @@ class _SaphirPlayerViewState extends State<SaphirPlayerView> {
         final durMs = widget.controller.duration.inMilliseconds;
         final posMs = widget.controller.position.inMilliseconds;
         final sliderValue = durMs > 0 ? (posMs / durMs).clamp(0.0, 1.0) : 0.0;
+
+        final nextTooltip = next != null
+            ? '${AppStrings.playerNextEpisodeTooltip}: ${next.subtitle.isNotEmpty ? next.subtitle : next.title}'
+            : AppStrings.playerNextEpisodeTooltip;
+
+        final topHud = Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          child: Container(
+            height: AppSpacing.playerTopHudHeight,
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.lg,
+              vertical: AppSpacing.md,
+            ),
+            decoration: const BoxDecoration(
+              gradient: AppColors.playerTopHudGradient,
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                IconButton(
+                  tooltip: AppStrings.playerCloseTooltip,
+                  onPressed: _exitPlayer,
+                  icon: const Icon(Icons.arrow_back),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        entry?.title ?? AppStrings.appTitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      if (entry != null && entry.subtitle.isNotEmpty)
+                        Text(
+                          entry.subtitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: AppStrings.playerFullscreenTooltip,
+                  onPressed: widget.controller.toggleFullscreen,
+                  icon: Icon(
+                    widget.controller.isFullscreen
+                        ? Icons.fullscreen_exit
+                        : Icons.fullscreen,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+
+        final bottomHud = Positioned(
+          bottom: 0,
+          left: 0,
+          right: 0,
+          child: Container(
+            height: AppSpacing.playerBottomHudHeight,
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.lg,
+              AppSpacing.lg,
+              AppSpacing.lg,
+              AppSpacing.md,
+            ),
+            decoration: const BoxDecoration(
+              gradient: AppColors.playerBottomHudGradient,
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      _formatDuration(widget.controller.position),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: MouseRegion(
+                        onEnter: (_) => setState(() => _isSeekHovered = true),
+                        onExit: (_) => setState(() => _isSeekHovered = false),
+                        child: SliderTheme(
+                          data: SliderTheme.of(context).copyWith(
+                            trackHeight: AppSpacing.playerSeekTrackHeight,
+                            activeTrackColor: AppColors.sapphireBright,
+                            inactiveTrackColor: AppColors.progressTrack,
+                            thumbColor: AppColors.sapphireBright,
+                            overlayColor: AppColors.sapphireGlow,
+                            thumbShape: RoundSliderThumbShape(
+                              enabledThumbRadius: _isSeekHovered
+                                  ? AppSpacing.playerSeekThumbRadiusHover
+                                  : AppSpacing.playerSeekThumbRadius,
+                            ),
+                          ),
+                          child: Slider(
+                            value: sliderValue,
+                            onChanged: widget.controller.seekToRatio,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Text(
+                      _formatDuration(widget.controller.duration),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                Row(
+                  children: [
+                    IconButton(
+                      tooltip: AppStrings.playerPrevEpisodeTooltip,
+                      onPressed: widget.controller.hasPreviousEpisode
+                          ? widget.controller.playPreviousEpisode
+                          : null,
+                      icon: const Icon(Icons.skip_previous),
+                    ),
+                    IconButton(
+                      tooltip: AppStrings.playerSeekBackTooltip,
+                      onPressed: () => widget.controller
+                          .seekRelativeSeconds(-AppSpacing.seekStepSeconds),
+                      icon: const Icon(Icons.replay_10),
+                    ),
+                    IconButton(
+                      tooltip: widget.controller.isPlaying
+                          ? AppStrings.playerPauseTooltip
+                          : AppStrings.playerPlayTooltip,
+                      onPressed: widget.controller.togglePlayPause,
+                      icon: Icon(
+                        widget.controller.isPlaying
+                            ? Icons.pause_circle_filled
+                            : Icons.play_circle_filled,
+                        size: AppSpacing.iconSizeXl,
+                        color: AppColors.sapphireBright,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: AppStrings.playerSeekForwardTooltip,
+                      onPressed: () => widget.controller
+                          .seekRelativeSeconds(AppSpacing.seekStepSeconds),
+                      icon: const Icon(Icons.forward_10),
+                    ),
+                    IconButton(
+                      tooltip: nextTooltip,
+                      onPressed: widget.controller.hasNextEpisode
+                          ? widget.controller.playNextEpisode
+                          : null,
+                      icon: const Icon(Icons.skip_next),
+                    ),
+                    const SizedBox(width: AppSpacing.md),
+                    IconButton(
+                      tooltip: widget.controller.isMuted
+                          ? AppStrings.playerUnmuteTooltip
+                          : AppStrings.playerMuteTooltip,
+                      onPressed: widget.controller.toggleMute,
+                      icon: Icon(
+                        widget.controller.isMuted
+                            ? Icons.volume_off
+                            : Icons.volume_up,
+                        size: AppSpacing.iconSizeMd,
+                      ),
+                    ),
+                    SizedBox(
+                      width: AppSpacing.hudSliderWidth,
+                      child: SliderTheme(
+                        data: SliderTheme.of(context).copyWith(
+                          trackHeight: AppSpacing.progressBarHeight,
+                          activeTrackColor: AppColors.sapphireBright,
+                          inactiveTrackColor: AppColors.progressTrack,
+                          thumbColor: AppColors.textPrimary,
+                          thumbShape: const RoundSliderThumbShape(
+                            enabledThumbRadius:
+                                AppSpacing.playerSeekThumbRadius,
+                          ),
+                        ),
+                        child: Slider(
+                          min: AppSpacing.volumeMin,
+                          max: AppSpacing.volumeMax,
+                          value: widget.controller.volume.clamp(
+                            AppSpacing.volumeMin,
+                            AppSpacing.volumeMax,
+                          ),
+                          onChanged: (val) => widget.controller
+                              .adjustVolume(val - widget.controller.volume),
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
+                    _buildAudioMenu(),
+                    _buildSubtitleMenu(),
+                    _buildSpeedMenu(),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
 
         return Focus(
           focusNode: _focusNode,
@@ -167,8 +378,10 @@ class _SaphirPlayerViewState extends State<SaphirPlayerView> {
                         ),
                       if (widget.controller.showAutoNextCard && next != null)
                         Positioned(
-                          right: AppSpacing.md,
-                          bottom: hudVisible ? 116.0 : AppSpacing.md,
+                          right: AppSpacing.lg,
+                          bottom: hudVisible
+                              ? AppSpacing.autoNextBottomWithHud
+                              : AppSpacing.lg,
                           child: SizedBox(
                             width: AppSpacing.autoNextCardWidth,
                             child: SurfacePanel(
@@ -220,176 +433,24 @@ class _SaphirPlayerViewState extends State<SaphirPlayerView> {
                             ),
                           ),
                         ),
-                      if (hudVisible) ...[
-                        Positioned(
-                          top: AppSpacing.md,
-                          left: AppSpacing.md,
-                          right: AppSpacing.md,
-                          child: SurfacePanel(
-                            effectMode: widget.effectMode,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: AppSpacing.md,
-                              vertical: AppSpacing.xs,
-                            ),
-                            child: Row(
-                              children: [
-                                IconButton(
-                                  tooltip: AppStrings.playerCloseTooltip,
-                                  onPressed: _exitPlayer,
-                                  icon: const Icon(Icons.arrow_back),
-                                ),
-                                const SizedBox(width: AppSpacing.xs),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text(
-                                        entry?.title ?? AppStrings.appTitle,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .titleMedium,
-                                      ),
-                                      if (entry != null &&
-                                          entry.subtitle.isNotEmpty)
-                                        Text(
-                                          entry.subtitle,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .bodySmall,
-                                        ),
-                                    ],
-                                  ),
-                                ),
-                                IconButton(
-                                  tooltip: AppStrings.playerFullscreenTooltip,
-                                  onPressed: widget.controller.toggleFullscreen,
-                                  icon: Icon(
-                                    widget.controller.isFullscreen
-                                        ? Icons.fullscreen_exit
-                                        : Icons.fullscreen,
-                                  ),
-                                ),
-                              ],
+                      if (isGlass) ...[
+                        Positioned.fill(
+                          child: IgnorePointer(
+                            ignoring: !hudVisible,
+                            child: AnimatedOpacity(
+                              opacity: hudVisible ? 1.0 : 0.0,
+                              duration: const Duration(
+                                milliseconds: AppSpacing.hudFadeAnimationMs,
+                              ),
+                              child: Stack(
+                                children: [topHud, bottomHud],
+                              ),
                             ),
                           ),
                         ),
-                        Positioned(
-                          bottom: AppSpacing.md,
-                          left: AppSpacing.md,
-                          right: AppSpacing.md,
-                          child: SurfacePanel(
-                            effectMode: widget.effectMode,
-                            padding: const EdgeInsets.all(AppSpacing.sm),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Row(
-                                  children: [
-                                    Text(
-                                      _formatDuration(
-                                          widget.controller.position),
-                                      style:
-                                          Theme.of(context).textTheme.bodySmall,
-                                    ),
-                                    Expanded(
-                                      child: Slider(
-                                        value: sliderValue,
-                                        onChanged:
-                                            widget.controller.seekToRatio,
-                                      ),
-                                    ),
-                                    Text(
-                                      _formatDuration(
-                                          widget.controller.duration),
-                                      style:
-                                          Theme.of(context).textTheme.bodySmall,
-                                    ),
-                                  ],
-                                ),
-                                Row(
-                                  children: [
-                                    IconButton(
-                                      tooltip:
-                                          AppStrings.playerPrevEpisodeTooltip,
-                                      onPressed:
-                                          widget.controller.hasPreviousEpisode
-                                              ? widget.controller
-                                                  .playPreviousEpisode
-                                              : null,
-                                      icon: const Icon(Icons.skip_previous),
-                                    ),
-                                    IconButton(
-                                      tooltip: AppStrings.playerSeekBackTooltip,
-                                      onPressed: () => widget.controller
-                                          .seekRelativeSeconds(
-                                              -AppSpacing.seekStepSeconds),
-                                      icon: const Icon(Icons.replay_10),
-                                    ),
-                                    IconButton(
-                                      tooltip: widget.controller.isPlaying
-                                          ? AppStrings.playerPauseTooltip
-                                          : AppStrings.playerPlayTooltip,
-                                      onPressed:
-                                          widget.controller.togglePlayPause,
-                                      icon: Icon(
-                                        widget.controller.isPlaying
-                                            ? Icons.pause_circle_filled
-                                            : Icons.play_circle_filled,
-                                        size: AppSpacing.iconSizeLg,
-                                        color: AppColors.sapphireBright,
-                                      ),
-                                    ),
-                                    IconButton(
-                                      tooltip:
-                                          AppStrings.playerSeekForwardTooltip,
-                                      onPressed: () => widget.controller
-                                          .seekRelativeSeconds(
-                                              AppSpacing.seekStepSeconds),
-                                      icon: const Icon(Icons.forward_10),
-                                    ),
-                                    IconButton(
-                                      tooltip:
-                                          AppStrings.playerNextEpisodeTooltip,
-                                      onPressed: widget
-                                              .controller.hasNextEpisode
-                                          ? widget.controller.playNextEpisode
-                                          : null,
-                                      icon: const Icon(Icons.skip_next),
-                                    ),
-                                    const SizedBox(width: AppSpacing.md),
-                                    const Icon(
-                                      Icons.volume_up,
-                                      size: AppSpacing.iconSizeMd,
-                                    ),
-                                    SizedBox(
-                                      width: AppSpacing.hudSliderWidth,
-                                      child: Slider(
-                                        min: AppSpacing.volumeMin,
-                                        max: AppSpacing.volumeMax,
-                                        value: widget.controller.volume.clamp(
-                                          AppSpacing.volumeMin,
-                                          AppSpacing.volumeMax,
-                                        ),
-                                        onChanged: (val) => widget.controller
-                                            .adjustVolume(
-                                                val - widget.controller.volume),
-                                      ),
-                                    ),
-                                    const Spacer(),
-                                    _buildAudioMenu(),
-                                    _buildSubtitleMenu(),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
+                      ] else if (hudVisible) ...[
+                        topHud,
+                        bottomHud,
                       ],
                     ],
                   ),
@@ -448,6 +509,45 @@ class _SaphirPlayerViewState extends State<SaphirPlayerView> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildSpeedMenu() {
+    final currentSpeed = widget.controller.playbackSpeed;
+    return PopupMenuButton<double>(
+      tooltip: AppStrings.playerSpeedTooltip,
+      onSelected: widget.controller.setPlaybackSpeed,
+      itemBuilder: (context) => AppSpacing.playbackSpeeds
+          .map(
+            (speed) => PopupMenuItem<double>(
+              value: speed,
+              child: Text(
+                '${speed}x',
+                style: TextStyle(
+                  color: speed == currentSpeed
+                      ? AppColors.sapphireBright
+                      : AppColors.textPrimary,
+                  fontWeight: speed == currentSpeed
+                      ? FontWeight.w700
+                      : FontWeight.w400,
+                ),
+              ),
+            ),
+          )
+          .toList(),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.sm,
+          vertical: AppSpacing.xs,
+        ),
+        child: Text(
+          '${currentSpeed}x',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: AppColors.textPrimary,
+                fontWeight: FontWeight.w600,
+              ),
+        ),
+      ),
     );
   }
 }

@@ -1,11 +1,20 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 class PortablePaths {
   PortablePaths._();
 
+  @visibleForTesting
+  static String? testBaseDirectoryOverride;
+
   static Future<String> resolveBaseDirectory() async {
+    final override = testBaseDirectoryOverride;
+    if (override != null && override.isNotEmpty) {
+      return override;
+    }
+
     final exeDir = p.dirname(Platform.resolvedExecutable);
     final markerFile = File(p.join(exeDir, 'portable.flag'));
     final dataDir = Directory(p.join(exeDir, 'data'));
