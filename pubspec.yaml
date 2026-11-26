@@ -1,0 +1,20 @@
+name: saphir_player
+description: Lokaler Streaming-Videoplayer fuer Serien und Filme mit portablem NAS- und Sync-Konzept.
+publish_to: "none"
+version: 0.1.0
+
+environment:
+  sdk: ">=3.5.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  path: ^1.9.0
+  path_provider: ^2.1.4
+  sqlite3: ^2.4.6
+  window_manager: ^0.4.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+    
