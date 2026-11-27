@@ -45,6 +45,16 @@ class AppStrings {
   static const String settingsSyncSectionTitle = 'Synchronisation & Cache';
   static const String settingsSyncSectionDesc =
       'Fortschritte manuell abgleichen oder zwischengespeicherte Vorschaubilder bereinigen.';
+  static const String settingsPageSubtitle =
+      'Medienquellen, Wiedergabe, Darstellung und lokalen Cache verwalten.';
+  static const String settingsSyncActionTitle = 'Fortschritt synchronisieren';
+  static const String settingsSyncActionDesc =
+      'Gleicht den Wiedergabestand über progress_sync.json auf dem NAS ab.';
+  static const String settingsCacheActionDesc =
+      'Zwischengespeicherte Vorschaubilder freigeben.';
+  static const String settingsDangerZoneTitle = 'Gefahrenbereich';
+  static const String settingsDangerZoneDesc =
+      'Löscht alle lokalen Seriendaten, Fortschritte und Einstellungen unwiderruflich.';
 
   static const String scanButton = 'Bibliothek scannen';
   static const String scanningStatus = 'Scan läuft...';

@@ -71,25 +71,7 @@ class WindowTitleBar extends StatelessWidget {
                       ),
                     ),
                     const Spacer(),
-                    _WindowControlButton(
-                      tooltip: AppStrings.windowMinimizeTooltip,
-                      icon: Icons.remove,
-                      onPressed: shellController.minimizeWindow,
-                    ),
-                    _WindowControlButton(
-                      tooltip: shellController.isMaximized
-                          ? AppStrings.windowRestoreTooltip
-                          : AppStrings.windowMaximizeTooltip,
-                      icon: shellController.isMaximized
-                          ? Icons.filter_none
-                          : Icons.crop_square,
-                      onPressed: shellController.toggleMaximizeWindow,
-                    ),
-                    _WindowControlButton(
-                      tooltip: AppStrings.windowCloseTooltip,
-                      icon: Icons.close,
-                      onPressed: shellController.closeWindow,
-                    ),
+                    _WindowControlsRow(shellController: shellController),
                   ],
                 ),
               ),
@@ -190,16 +172,55 @@ class _GlobalSearchField extends StatelessWidget {
   }
 }
 
+class _WindowControlsRow extends StatelessWidget {
+  const _WindowControlsRow({required this.shellController});
+
+  final ShellController shellController;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _WindowControlButton(
+          tooltip: AppStrings.windowMinimizeTooltip,
+          icon: Icons.remove,
+          onPressed: shellController.minimizeWindow,
+        ),
+        _WindowControlButton(
+          tooltip: shellController.isMaximized
+              ? AppStrings.windowRestoreTooltip
+              : AppStrings.windowMaximizeTooltip,
+          icon: shellController.isMaximized
+              ? Icons.filter_none
+              : Icons.crop_square,
+          iconSize: shellController.isMaximized
+              ? AppSpacing.windowRestoreIconSize
+              : AppSpacing.windowMaximizeIconSize,
+          onPressed: shellController.toggleMaximizeWindow,
+        ),
+        _WindowControlButton(
+          tooltip: AppStrings.windowCloseTooltip,
+          icon: Icons.close,
+          onPressed: shellController.closeWindow,
+        ),
+      ],
+    );
+  }
+}
+
 class _WindowControlButton extends StatelessWidget {
   const _WindowControlButton({
     required this.tooltip,
     required this.icon,
     required this.onPressed,
+    this.iconSize = AppSpacing.windowControlIconSize,
   });
 
   final String tooltip;
   final IconData icon;
   final VoidCallback onPressed;
+  final double iconSize;
 
   @override
   Widget build(BuildContext context) {
@@ -213,7 +234,7 @@ class _WindowControlButton extends StatelessWidget {
       ),
       icon: Icon(
         icon,
-        size: AppSpacing.windowControlIconSize,
+        size: iconSize,
       ),
     );
   }

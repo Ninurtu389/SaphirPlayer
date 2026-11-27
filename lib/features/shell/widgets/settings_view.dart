@@ -5,7 +5,9 @@ import '../../../core/constants/app_strings.dart';
 import '../../../core/controllers/library_controller.dart';
 import '../../../core/controllers/settings_controller.dart';
 import '../../../core/theme/effect_mode.dart';
+import 'settings_cards.dart';
 import 'settings_subtitle_section.dart';
+import 'settings_sync_card.dart';
 
 class SettingsView extends StatelessWidget {
   const SettingsView({
@@ -46,23 +48,18 @@ class SettingsView extends StatelessWidget {
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(
-            maxWidth: AppSpacing.maxSettingsWidth,
+            maxWidth: AppSpacing.statsMaxWidth,
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                AppStrings.settingsTab,
-                style: Theme.of(context).textTheme.headlineLarge,
-              ),
+              _SettingsHeader(onSaveSettings: onSaveSettings),
+              if (statusMessage != null) ...[
+                const SizedBox(height: AppSpacing.md),
+                _SettingsStatusBanner(message: statusMessage!),
+              ],
               const SizedBox(height: AppSpacing.lg),
-              _buildMediaSection(context),
-              const SizedBox(height: AppSpacing.md),
-              _buildAppearanceSection(context),
-              const SizedBox(height: AppSpacing.md),
-              SettingsSubtitleSection(settingsController: settingsController),
-              const SizedBox(height: AppSpacing.md),
-              _buildSyncSection(context),
+              _buildResponsiveGrid(),
             ],
           ),
         ),
@@ -70,257 +67,150 @@ class SettingsView extends StatelessWidget {
     );
   }
 
-  Widget _buildMediaSection(BuildContext context) {
-    final folders = settingsController.nasPaths;
-    return SettingsSectionCard(
-      title: AppStrings.settingsMediaSectionTitle,
-      description: AppStrings.settingsMediaSectionDesc,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+  Widget _buildResponsiveGrid() {
+    final mediaCard = SettingsMediaCard(
+      settingsController: settingsController,
+      libraryController: libraryController,
+      nasInputController: nasInputController,
+      onAddFolderFromInput: onAddFolderFromInput,
+      onAddFolderFromPicker: onAddFolderFromPicker,
+      onRemoveFolder: onRemoveFolder,
+      onTriggerScan: onTriggerScan,
+    );
+    final appearanceCard = SettingsAppearanceCard(
+      settingsController: settingsController,
+      effectMode: effectMode,
+    );
+    final subtitleCard = SettingsSubtitleSection(
+      settingsController: settingsController,
+    );
+    final syncCard = SettingsSyncCard(
+      settingsController: settingsController,
+      onSyncNow: onSyncNow,
+      onClearCache: onClearCache,
+      onResetDatabase: onResetDatabase,
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth >= AppSpacing.settingsTwoColumnBreakpoint) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: TextField(
-                  controller: nasInputController,
-                  onSubmitted: (_) => onAddFolderFromInput(),
-                  decoration: const InputDecoration(
-                    labelText: AppStrings.nasPathLabel,
-                    hintText: AppStrings.nasPathHint,
-                    isDense: true,
-                  ),
+                child: Column(
+                  children: [
+                    mediaCard,
+                    const SizedBox(height: AppSpacing.md),
+                    syncCard,
+                  ],
                 ),
               ),
-              const SizedBox(width: AppSpacing.sm),
-              ElevatedButton.icon(
-                onPressed: onAddFolderFromPicker,
-                icon: const Icon(
-                  Icons.create_new_folder_outlined,
-                  size: AppSpacing.iconSizeMd,
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  children: [
+                    appearanceCard,
+                    const SizedBox(height: AppSpacing.md),
+                    subtitleCard,
+                  ],
                 ),
-                label: const Text(AppStrings.addFolderButton),
               ),
             ],
-          ),
-          const SizedBox(height: AppSpacing.md),
-          if (folders.isEmpty)
-            Text(
-              AppStrings.noFoldersConfigured,
-              style: Theme.of(context).textTheme.bodySmall,
-            )
-          else
-            ListView.separated(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: folders.length,
-              separatorBuilder: (context, index) =>
-                  const SizedBox(height: AppSpacing.xs),
-              itemBuilder: (context, index) => _FolderListItem(
-                folderPath: folders[index],
-                onRemove: () => onRemoveFolder(folders[index]),
-              ),
-            ),
-          const SizedBox(height: AppSpacing.md),
-          Row(
-            children: [
-              ElevatedButton.icon(
-                onPressed: libraryController.isScanning ? null : onTriggerScan,
-                icon: const Icon(Icons.refresh, size: AppSpacing.iconSizeMd),
-                label: const Text(AppStrings.scanButton),
-              ),
-              if (libraryController.statusMessage.isNotEmpty) ...[
-                const SizedBox(width: AppSpacing.md),
-                Expanded(
-                  child: Text(
-                    libraryController.statusMessage,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ],
-      ),
-    );
-  }
+          );
+        }
 
-  Widget _buildAppearanceSection(BuildContext context) {
-    return SettingsSectionCard(
-      title: AppStrings.settingsAppearanceSectionTitle,
-      description: AppStrings.settingsAppearanceSectionDesc,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SegmentedButton<EffectMode>(
-            segments: const [
-              ButtonSegment<EffectMode>(
-                value: EffectMode.glass,
-                label: Text(AppStrings.effectGlassLabel),
-              ),
-              ButtonSegment<EffectMode>(
-                value: EffectMode.lean,
-                label: Text(AppStrings.effectLeanLabel),
-              ),
-            ],
-            selected: {effectMode},
-            onSelectionChanged: (selection) {
-              settingsController.updateEffectMode(selection.first);
-            },
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            effectMode == EffectMode.glass
-                ? AppStrings.settingsEffectGlassDesc
-                : AppStrings.settingsEffectLeanDesc,
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          const SizedBox(height: AppSpacing.md),
-          const Divider(height: AppSpacing.dividerThickness),
-          const SizedBox(height: AppSpacing.xs),
-          Material(
-            color: AppColors.borderTransparent,
-            child: SwitchListTile(
-              tileColor: AppColors.borderTransparent,
-              contentPadding: EdgeInsets.zero,
-              title: const Text(AppStrings.perDeviceEffectLabel),
-              subtitle: Text(
-                AppStrings.settingsPerDeviceDesc,
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-              value: settingsController.perDeviceEffect,
-              onChanged: settingsController.updatePerDeviceEffect,
-            ),
-          ),
-          const Divider(height: AppSpacing.dividerThickness),
-          Material(
-            color: AppColors.borderTransparent,
-            child: SwitchListTile(
-              tileColor: AppColors.borderTransparent,
-              contentPadding: EdgeInsets.zero,
-              title: const Text(AppStrings.settingsHwdecLabel),
-              subtitle: Text(
-                AppStrings.settingsHwdecDesc,
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-              value: settingsController.hardwareAccelerationEnabled,
-              onChanged: settingsController.updateHardwareAcceleration,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSyncSection(BuildContext context) {
-    return SettingsSectionCard(
-      title: AppStrings.settingsSyncSectionTitle,
-      description: AppStrings.settingsSyncSectionDesc,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '${AppStrings.cacheSectionTitle}: ${settingsController.formattedCacheSize}',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: AppColors.textSecondary,
-                ),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          Wrap(
-            spacing: AppSpacing.sm,
-            runSpacing: AppSpacing.xs,
-            children: [
-              ElevatedButton.icon(
-                onPressed: onSaveSettings,
-                icon: const Icon(
-                  Icons.save_outlined,
-                  size: AppSpacing.iconSizeMd,
-                ),
-                label: const Text(AppStrings.saveSettingsButton),
-              ),
-              OutlinedButton.icon(
-                onPressed: onSyncNow,
-                icon: const Icon(Icons.sync, size: AppSpacing.iconSizeMd),
-                label: const Text(AppStrings.syncNowButton),
-              ),
-              OutlinedButton.icon(
-                onPressed: onClearCache,
-                icon: const Icon(
-                  Icons.delete_outline,
-                  size: AppSpacing.iconSizeMd,
-                ),
-                label: const Text(AppStrings.clearCacheButton),
-              ),
-              OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.errorRed,
-                  side: const BorderSide(color: AppColors.errorRed),
-                ),
-                onPressed: onResetDatabase,
-                icon: const Icon(
-                  Icons.delete_forever_outlined,
-                  size: AppSpacing.iconSizeMd,
-                ),
-                label: const Text(AppStrings.resetDatabaseButton),
-              ),
-            ],
-          ),
-          if (statusMessage != null) ...[
-            const SizedBox(height: AppSpacing.sm),
-            Text(
-              statusMessage!,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: AppColors.successGreen,
-                  ),
-            ),
+        return Column(
+          children: [
+            mediaCard,
+            const SizedBox(height: AppSpacing.md),
+            appearanceCard,
+            const SizedBox(height: AppSpacing.md),
+            subtitleCard,
+            const SizedBox(height: AppSpacing.md),
+            syncCard,
           ],
+        );
+      },
+    );
+  }
+}
+
+class _SettingsHeader extends StatelessWidget {
+  const _SettingsHeader({required this.onSaveSettings});
+
+  final VoidCallback onSaveSettings;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: AppSpacing.md,
+        runSpacing: AppSpacing.sm,
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                AppStrings.settingsTab,
+                style: Theme.of(context).textTheme.headlineLarge,
+              ),
+              const SizedBox(height: AppSpacing.xxs),
+              Text(
+                AppStrings.settingsPageSubtitle,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+          ElevatedButton.icon(
+            onPressed: onSaveSettings,
+            icon: const Icon(
+              Icons.save_outlined,
+              size: AppSpacing.iconSizeMd,
+            ),
+            label: const Text(AppStrings.saveSettingsButton),
+          ),
         ],
       ),
     );
   }
 }
 
-class _FolderListItem extends StatelessWidget {
-  const _FolderListItem({
-    required this.folderPath,
-    required this.onRemove,
-  });
+class _SettingsStatusBanner extends StatelessWidget {
+  const _SettingsStatusBanner({required this.message});
 
-  final String folderPath;
-  final VoidCallback onRemove;
+  final String message;
 
   @override
   Widget build(BuildContext context) {
     return Container(
+      width: double.infinity,
       padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.sm,
-        vertical: AppSpacing.xs,
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.sm,
       ),
       decoration: BoxDecoration(
-        color: AppColors.elevatedSurface,
+        color: AppColors.successBannerFill,
         borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+        border: Border.all(color: AppColors.successBannerBorder),
       ),
       child: Row(
         children: [
           const Icon(
-            Icons.folder_outlined,
-            color: AppColors.sapphireBright,
+            Icons.check_circle_outline,
             size: AppSpacing.iconSizeMd,
+            color: AppColors.successGreen,
           ),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
-              folderPath,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-          ),
-          IconButton(
-            tooltip: AppStrings.removeFolderTooltip,
-            onPressed: onRemove,
-            icon: const Icon(
-              Icons.delete_outline,
-              size: AppSpacing.iconSizeMd,
+              message,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.successGreen,
+                  ),
             ),
           ),
         ],

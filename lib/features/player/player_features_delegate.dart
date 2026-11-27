@@ -47,6 +47,7 @@ class PlayerFeaturesDelegate {
   int subtitleDelayMs = 0;
   List<PlayerChapter> chapters = const [];
   bool chaptersLoadedForEntry = false;
+  bool introSkipped = false;
   int seriesIntroSkipSeconds = 0;
   List<MediaBookmark> bookmarks = const [];
   TimeDisplayMode timeDisplayMode = TimeDisplayMode.total;
@@ -70,6 +71,7 @@ class PlayerFeaturesDelegate {
   void resetForEntry(PlaybackQueueEntry entry) {
     chapters = const [];
     chaptersLoadedForEntry = false;
+    introSkipped = false;
     bookmarks = _persistence.loadBookmarks(entry.mediaKey);
     seriesIntroSkipSeconds = entry.seriesId != null
         ? (_persistence.loadSeriesPreferences(entry.seriesId!)?.introSkipSeconds ??
@@ -216,6 +218,7 @@ class PlayerFeaturesDelegate {
     Duration position,
     Duration duration,
   ) async {
+    introSkipped = true;
     final nextChapter = nextChapterInIntroWindow(position);
     if (nextChapter != null) {
       await _player.seek(Duration(milliseconds: nextChapter.startMs));
@@ -232,6 +235,7 @@ class PlayerFeaturesDelegate {
       PlayerActionOsdKind.introSkip,
       AppStrings.playerIntroSkipButton,
     );
+    _onChanged();
   }
 
   void setSeriesIntroSkipSeconds(int? seriesId, int seconds) {

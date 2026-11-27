@@ -75,6 +75,7 @@ class SaphirPlayerController extends ChangeNotifier {
   Timer? _progressTimer;
   bool _isDisposed = false;
   int _openRequestId = 0;
+  int? _pendingStartPositionMs;
 
   PlaybackSession? _session;
   int _currentIndex = 0;
@@ -161,9 +162,9 @@ class SaphirPlayerController extends ChangeNotifier {
       currentEntry?.mediaType == 'episode' &&
       _errorMessage == null &&
       _duration > Duration.zero &&
-      _position.inSeconds <= AppSpacing.introSkipWindowSeconds &&
-      (_features.nextChapterInIntroWindow(_position) != null ||
-          effectiveIntroSkipSeconds > 0);
+      !_features.introSkipped &&
+      _position.inMilliseconds < effectiveIntroSkipSeconds * AppSpacing.millisecondsPerSecond &&
+      (_features.nextChapterInIntroWindow(_position) != null || effectiveIntroSkipSeconds > 0);
 
   void dismissAutoNext() {
     _autoNextDismissed = true;
@@ -182,6 +183,13 @@ class SaphirPlayerController extends ChangeNotifier {
         if (dur > Duration.zero && !_features.chaptersLoadedForEntry) {
           _features.chaptersLoadedForEntry = true;
           unawaited(_features.loadChapters(() => _isDisposed));
+        }
+        final pendingMs = dur > Duration.zero ? _pendingStartPositionMs : null;
+        if (pendingMs != null) {
+          _pendingStartPositionMs = null;
+          if (_position.inMilliseconds < pendingMs - (2 * AppSpacing.millisecondsPerSecond)) {
+            unawaited(_player.seek(Duration(milliseconds: pendingMs)));
+          }
         }
         _safeNotify();
       }),
@@ -232,10 +240,7 @@ class SaphirPlayerController extends ChangeNotifier {
     if (sleepTimerOption == SleepTimerOption.endOfEpisode) {
       _overlays.cancelSleepTimer();
       await _player.pause();
-      _overlays.showActionOsd(
-        PlayerActionOsdKind.sleepTimer,
-        AppStrings.sleepTimerTriggeredOsd,
-      );
+      _overlays.showActionOsd(PlayerActionOsdKind.sleepTimer, AppStrings.sleepTimerTriggeredOsd);
       return;
     }
     if (hasNextEpisode && !_autoNextDismissed) await playNextEpisode();
@@ -243,16 +248,9 @@ class SaphirPlayerController extends ChangeNotifier {
 
   void _startProgressTimer() {
     _progressTimer?.cancel();
-    _progressTimer = Timer.periodic(
-      const Duration(seconds: AppSpacing.progressSaveIntervalSeconds),
-      (_) => _persistProgress(syncRemote: false),
-    );
+    _progressTimer = Timer.periodic(const Duration(seconds: AppSpacing.progressSaveIntervalSeconds), (_) => _persistProgress(syncRemote: false));
   }
-
-  void _stopProgressTimer() {
-    _progressTimer?.cancel();
-    _progressTimer = null;
-  }
+  void _stopProgressTimer() { _progressTimer?.cancel(); _progressTimer = null; }
 
   void _applyTrackPreferences() {
     final sid = currentEntry?.seriesId;
@@ -305,21 +303,25 @@ class SaphirPlayerController extends ChangeNotifier {
     _autoAppliedSubtitleId = null;
     _persistence.resetHistoryTracking();
     final entry = s.queue[_currentIndex];
+    final startPosMs = entry.startPositionMs;
+    _pendingStartPositionMs = startPosMs > 0 ? startPosMs : null;
     _features.resetForEntry(entry);
     _safeNotify();
     final status = await LocalFileService.checkPlayableFile(entry.filePath);
     if (_isDisposed || requestId != _openRequestId) return;
     if (status != PlayableFileStatus.ok) {
-      _errorMessage = status == PlayableFileStatus.missing
-          ? AppStrings.playerFileMissingError
-          : AppStrings.playerEmptyFileError;
+      _errorMessage = status == PlayableFileStatus.missing ? AppStrings.playerFileMissingError : AppStrings.playerEmptyFileError;
       _safeNotify();
       return;
     }
     try {
-      await _player.open(Media(entry.filePath), play: true);
+      await _mpvBridge.setProperty('start', 'none');
+      await _player.open(Media(entry.filePath, start: startPosMs > 0 ? Duration(milliseconds: startPosMs) : null), play: true);
       if (_isDisposed || requestId != _openRequestId) return;
-      if (entry.startPositionMs > 0) await _player.seek(Duration(milliseconds: entry.startPositionMs));
+      if (startPosMs > 0) {
+        await _player.seek(Duration(milliseconds: startPosMs));
+        if (_position.inMilliseconds >= startPosMs - AppSpacing.millisecondsPerSecond) _pendingStartPositionMs = null;
+      }
       await _features.applySubtitleStyle();
     } catch (_) {
       if (_isDisposed || requestId != _openRequestId) return;

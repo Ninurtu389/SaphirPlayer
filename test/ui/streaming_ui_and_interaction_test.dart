@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:path/path.dart' as p;
+import 'package:saphir_player/core/constants/app_spacing.dart';
 import 'package:saphir_player/core/constants/app_strings.dart';
 import 'package:saphir_player/core/controllers/library_controller.dart';
 import 'package:saphir_player/core/controllers/settings_controller.dart';
@@ -277,6 +278,9 @@ void main() {
 
       expect(find.text(AppStrings.statsPageTitle), findsOneWidget);
       expect(find.byIcon(Icons.search), findsOneWidget);
+      final maxIcon = tester.widget<Icon>(find.byIcon(Icons.crop_square));
+      expect(maxIcon.size, AppSpacing.windowMaximizeIconSize);
+      expect(maxIcon.size! < AppSpacing.windowControlIconSize, isTrue);
     }
   });
 }

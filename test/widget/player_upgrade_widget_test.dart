@@ -105,6 +105,11 @@ void main() {
     await tester.tap(find.text(AppStrings.subtitleLangEn));
     await tester.pump();
     expect(settingsController.preferredSubtitleLanguage, AppStrings.subtitleLangCodeEn);
+
+    // Also verify compact width renders without overflow
+    tester.view.physicalSize = const Size(390, 844);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('SaphirPlayerView handles extended shortcuts and tiered Esc',

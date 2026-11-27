@@ -21,6 +21,8 @@ class AppSpacing {
   static const double windowControlWidth = 34.0;
   static const double windowControlHeight = 26.0;
   static const double windowControlIconSize = 14.0;
+  static const double windowMaximizeIconSize = 12.0;
+  static const double windowRestoreIconSize = 10.0;
   static const double titleBarSearchHeight = 26.0;
   static const double titleBarSearchHorizontalClearance = 148.0;
   static const double titleBarLogoDotSize = 7.0;
@@ -70,6 +72,9 @@ class AppSpacing {
   static const double seasonTabIndicatorHeight = 3.0;
 
   static const double maxSettingsWidth = 760.0;
+  static const double settingsTwoColumnBreakpoint = 820.0;
+  static const double settingsCompactRowBreakpoint = 420.0;
+  static const double settingsIconBadgeSize = 36.0;
   static const double dividerThickness = 1.0;
   static const double railSpacing = 14.0;
   static const double iconSizeSm = 16.0;

@@ -163,6 +163,7 @@ void main() {
 
     await controller.skipIntro();
     expect(harness.seekTargets.last, const Duration(milliseconds: 85000));
+    expect(controller.showIntroSkipButton, isFalse);
     controller.setSeriesIntroSkipSeconds(90);
     expect(controller.seriesIntroSkipSeconds, 90);
 
@@ -227,5 +228,53 @@ void main() {
     expect(controller.isMiniPlayer, isFalse);
     expect(harness.alwaysOnTopStates.last, isFalse);
     expect(harness.windowBoundsHistory.last, const Rect.fromLTWH(100, 100, 1280, 800));
+  });
+
+  test('intro skip button hides after configured seconds and resume sets Media.start',
+      () async {
+    final ep1 = createSyntheticMp4HeaderFile(mediaDir, 'ep1.mp4');
+    final ep2 = createSyntheticMp4HeaderFile(mediaDir, 'ep2.mp4');
+
+    await controller.startSession(
+      PlaybackSession(
+        queue: [
+          PlaybackQueueEntry(
+            mediaKey: 'episode_1',
+            mediaType: 'episode',
+            title: 'Dark',
+            subtitle: 'S1E1',
+            filePath: ep1.path,
+            seriesId: 1,
+            startPositionMs: 120000,
+          ),
+          PlaybackQueueEntry(
+            mediaKey: 'episode_2',
+            mediaType: 'episode',
+            title: 'Dark',
+            subtitle: 'S1E2',
+            filePath: ep2.path,
+            seriesId: 1,
+            startPositionMs: 0,
+          ),
+        ],
+        initialIndex: 0,
+      ),
+    );
+
+    expect(harness.openedMedia.first.start, const Duration(milliseconds: 120000));
+    expect(bridge.properties['start'], 'none');
+
+    // Switch to episode 2 starting at 0, verify intro skip auto-hides after configured duration
+    await controller.playNextEpisode();
+    expect(harness.openedMedia.last.start, isNull);
+    controller.setSeriesIntroSkipSeconds(60);
+    harness.emitDuration(const Duration(minutes: 30));
+    harness.emitPosition(const Duration(seconds: 40));
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.showIntroSkipButton, isTrue);
+
+    harness.emitPosition(const Duration(seconds: 60));
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.showIntroSkipButton, isFalse);
   });
 }
