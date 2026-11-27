@@ -17,6 +17,12 @@ void main() {
         '.m4v',
         '.webm',
         '.ts',
+        '.m2ts',
+        '.mpg',
+        '.mpeg',
+        '.vob',
+        '.flv',
+        '.ogv',
       ]) {
         expect(MediaParser.isVideoFile('video$ext'), isTrue);
         expect(MediaParser.isVideoFile('video${ext.toUpperCase()}'), isTrue);
@@ -146,6 +152,14 @@ void main() {
       expect(
         MetadataReader.readSeriesSummary(tempDir.path),
         'Kurze Zusammenfassung',
+      );
+
+      File(p.join(tempDir.path, 'tvshow.nfo')).writeAsStringSync(
+        '<tvshow><plot><![CDATA[Tom &amp; Jerry &quot;Test&quot; &#39;A&#39; &lt;1&gt;]]></plot></tvshow>',
+      );
+      expect(
+        MetadataReader.readSeriesSummary(tempDir.path),
+        'Tom & Jerry "Test" \'A\' <1>',
       );
     });
 

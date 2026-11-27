@@ -4,6 +4,7 @@ import '../../../core/constants/app_spacing.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../core/services/local_file_service.dart';
 import '../../../core/theme/effect_mode.dart';
+import '../../../core/utils/formatters.dart';
 import '../library_models.dart';
 
 class EpisodeRow extends StatefulWidget {
@@ -167,7 +168,10 @@ class _EpisodeInfo extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '${episode.episodeNumber}. ${episode.title}',
+            Formatters.formatEpisodeRowTitle(
+              episode.episodeNumber,
+              episode.title,
+            ),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: Theme.of(context).textTheme.titleMedium,

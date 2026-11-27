@@ -1,3 +1,4 @@
+import '../../features/library/library_models.dart';
 import '../../features/player/player_models.dart';
 import '../constants/app_spacing.dart';
 import '../constants/app_strings.dart';
@@ -104,6 +105,42 @@ class Formatters {
 
   static String formatSubtitleScale(double scale) {
     return '${scale.toStringAsFixed(1)}${AppStrings.timesSymbol}';
+  }
+
+  static String formatPlaybackSpeed(double speed) {
+    final roundedHundredths = (speed * 100).round();
+    final formatted = roundedHundredths % 10 != 0
+        ? speed.toStringAsFixed(2)
+        : speed.toStringAsFixed(1);
+    return '$formatted${AppStrings.timesSymbol}';
+  }
+
+  static String formatRemainingMinutes(int minutes) {
+    return '$minutes ${AppStrings.remainingMinutesSuffix}';
+  }
+
+  static String formatEpisodeRowTitle(int episodeNumber, String title) {
+    return '$episodeNumber. $title';
+  }
+
+  static String formatSeriesPlayButton(EpisodeEntry? resumeEp) {
+    if (resumeEp != null && resumeEp.positionMs > 0) {
+      final s = resumeEp.seasonNumber.toString().padLeft(2, '0');
+      final e = resumeEp.episodeNumber.toString().padLeft(2, '0');
+      return '${AppStrings.resumeButton} (S${s}E$e)';
+    }
+    return AppStrings.playEpisodeOneButton;
+  }
+
+  static String formatSeriesWatchedProgress(int watched, int total) {
+    return '$watched / $total ${AppStrings.episodesCountLabel} ${AppStrings.watchedBadge.toLowerCase()}';
+  }
+
+  static String formatHeroInfoLine(String subtitle, int remainingMinutes) {
+    if (remainingMinutes > 0) {
+      return '$subtitle · ${formatRemainingMinutes(remainingMinutes)}';
+    }
+    return subtitle;
   }
 
   static String formatPercent(num fractionOrPercent, {bool isFraction = true}) {

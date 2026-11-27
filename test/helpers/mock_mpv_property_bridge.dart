@@ -4,6 +4,7 @@ import 'package:saphir_player/features/player/player_models.dart';
 class MockMpvPropertyBridge implements IMpvPropertyBridge {
   final Map<String, String> properties = {};
   final List<List<String>> commands = [];
+  final List<bool> hwdecHistory = [];
   final List<bool> nightModeHistory = [];
   final List<double> volumeMaxHistory = [];
   final List<double> audioDelayHistory = [];
@@ -36,9 +37,19 @@ class MockMpvPropertyBridge implements IMpvPropertyBridge {
   }
 
   @override
+  Future<void> setHardwareDecoding(bool enabled) async {
+    hwdecHistory.add(enabled);
+    await setProperty('hwdec', enabled ? 'auto-safe' : 'no');
+  }
+
+  @override
   Future<void> setAudioNightMode(bool enabled) async {
     nightModeHistory.add(enabled);
-    await setProperty('af', enabled ? 'lavfi=[dynaudnorm=f=150:g=15]' : '');
+    await sendCommand([
+      'af',
+      enabled ? 'add' : 'remove',
+      'lavfi=[dynaudnorm=f=150:g=15]',
+    ]);
   }
 
   @override
@@ -80,10 +91,10 @@ class MockMpvPropertyBridge implements IMpvPropertyBridge {
     switch (mode) {
       case VideoAspectMode.original:
         await setProperty('panscan', '0');
-        await setProperty('video-aspect-override', '-1');
+        await setProperty('video-aspect-override', 'no');
       case VideoAspectMode.fillCrop:
         await setProperty('panscan', '1.0');
-        await setProperty('video-aspect-override', '-1');
+        await setProperty('video-aspect-override', 'no');
       case VideoAspectMode.ratio16x9:
         await setProperty('panscan', '0');
         await setProperty('video-aspect-override', '16:9');

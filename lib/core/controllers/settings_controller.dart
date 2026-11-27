@@ -1,12 +1,11 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/foundation.dart';
 import '../constants/app_spacing.dart';
 import '../constants/app_strings.dart';
 import '../services/desktop_platform_service.dart';
 import '../storage/database_service.dart';
-import '../storage/portable_paths.dart';
 import '../storage/progress_sync_service.dart';
+import '../storage/thumbnail_cache_service.dart';
 import '../theme/effect_mode.dart';
 import '../utils/formatters.dart';
 
@@ -14,10 +13,13 @@ class SettingsController extends ChangeNotifier {
   SettingsController(
     this._databaseService, {
     ProgressSyncService? syncService,
-  }) : _syncService = syncService ?? ProgressSyncService(_databaseService);
+    ThumbnailCacheService? cacheService,
+  })  : _syncService = syncService ?? ProgressSyncService(_databaseService),
+        _cacheService = cacheService ?? const ThumbnailCacheService();
 
   final DatabaseService _databaseService;
   final ProgressSyncService _syncService;
+  final ThumbnailCacheService _cacheService;
 
   static const String _nasPathKey = 'nas_root_path';
   static const String _nasPathsKey = 'nas_root_paths';
@@ -31,7 +33,6 @@ class SettingsController extends ChangeNotifier {
 
   bool _isDisposed = false;
   List<String> _nasPaths = [];
-  String _dataDirectoryPath = '';
   EffectMode _effectMode = EffectMode.glass;
   bool _perDeviceEffect = true;
   int _cacheBytes = 0;
@@ -44,7 +45,6 @@ class SettingsController extends ChangeNotifier {
 
   List<String> get nasPaths => List.unmodifiable(_nasPaths);
   String get nasPath => _nasPaths.isNotEmpty ? _nasPaths.first : '';
-  String get dataDirectoryPath => _dataDirectoryPath;
   EffectMode get effectMode => _effectMode;
   bool get perDeviceEffect => _perDeviceEffect;
   int get cacheBytes => _cacheBytes;
@@ -61,8 +61,8 @@ class SettingsController extends ChangeNotifier {
   String get _deviceHwdecKey =>
       'hwdec_${DesktopPlatformService.localHostname}';
 
-  Future<void> syncProgress() async {
-    await _syncService.syncWithRoots(_nasPaths);
+  Future<SyncResult> syncProgress() {
+    return _syncService.syncWithRoots(_nasPaths);
   }
 
   Future<bool?> pickAndAddFolder(String dialogTitle) async {
@@ -75,7 +75,6 @@ class SettingsController extends ChangeNotifier {
   }
 
   Future<void> load() async {
-    _dataDirectoryPath = await PortablePaths.getDataDirectory();
     await refreshCacheSize();
     final db = _databaseService.instance;
 
@@ -136,9 +135,10 @@ class SettingsController extends ChangeNotifier {
     _subtitlesEnabledByDefault = _readSetting(db, _subtitlesDefaultKey) == '1';
     final lang = _readSetting(db, _preferredSubtitleLangKey);
     _preferredSubtitleLanguage = _normalizeSubtitleLang(lang);
-    _subtitleScale = (double.tryParse(_readSetting(db, _subtitleScaleKey) ?? '') ??
-            AppSpacing.subtitleScaleDefault)
-        .clamp(AppSpacing.subtitleScaleMin, AppSpacing.subtitleScaleMax);
+    _subtitleScale =
+        (double.tryParse(_readSetting(db, _subtitleScaleKey) ?? '') ??
+                AppSpacing.subtitleScaleDefault)
+            .clamp(AppSpacing.subtitleScaleMin, AppSpacing.subtitleScaleMax);
     _subtitlePosition =
         (int.tryParse(_readSetting(db, _subtitlePositionKey) ?? '') ??
                 AppSpacing.subtitlePositionDefault)
@@ -176,47 +176,12 @@ class SettingsController extends ChangeNotifier {
   }
 
   Future<void> refreshCacheSize() async {
-    final cachePath = await PortablePaths.getCacheDirectory();
-    final cacheDir = Directory(cachePath);
-    var totalBytes = 0;
-
-    if (await cacheDir.exists()) {
-      await for (final entity
-          in cacheDir.list(recursive: false, followLinks: false)) {
-        if (entity is File) {
-          try {
-            totalBytes += await entity.length();
-          } on FileSystemException {
-            // Einzelne gesperrte Datei ignorieren
-          }
-        }
-      }
-    }
-
-    _cacheBytes = totalBytes;
+    _cacheBytes = await _cacheService.calculateCacheBytes();
     _safeNotify();
   }
 
   Future<void> clearThumbnailCache() async {
-    final cachePath = await PortablePaths.getCacheDirectory();
-    final cacheDir = Directory(cachePath);
-
-    if (await cacheDir.exists()) {
-      await for (final entity
-          in cacheDir.list(recursive: false, followLinks: false)) {
-        if (entity is File) {
-          try {
-            await entity.delete();
-          } on FileSystemException {
-            // Einzelne gesperrte Datei überspringen
-          }
-        }
-      }
-    }
-
-    final db = _databaseService.instance;
-    db.execute('UPDATE episodes SET thumb_path = NULL;');
-    db.execute('UPDATE movies SET thumb_path = NULL;');
+    await _cacheService.clearCache(_databaseService);
     await refreshCacheSize();
   }
 
@@ -249,26 +214,28 @@ class SettingsController extends ChangeNotifier {
     save();
   }
 
-  void updateNasPath(String value) {
-    final trimmed = value.trim();
-    if (trimmed.isEmpty) {
-      _nasPaths = [];
-    } else if (_nasPaths.isEmpty) {
-      _nasPaths = [trimmed];
-    } else {
-      _nasPaths[0] = trimmed;
-    }
-    notifyListeners();
-  }
-
   void updateEffectMode(EffectMode mode) {
     _effectMode = mode;
+    _persistEffectMode();
     notifyListeners();
   }
 
   void updatePerDeviceEffect(bool enabled) {
     _perDeviceEffect = enabled;
+    _persistEffectMode();
     notifyListeners();
+  }
+
+  void _persistEffectMode() {
+    if (_perDeviceEffect) {
+      _upsertSetting(_deviceEffectKey, _effectMode.toStorage());
+    } else {
+      _databaseService.instance.execute(
+        'DELETE FROM app_settings WHERE key = ?;',
+        [_deviceEffectKey],
+      );
+      _upsertSetting(_globalEffectKey, _effectMode.toStorage());
+    }
   }
 
   void updateSubtitlesDefaultEnabled(bool enabled) {
@@ -334,16 +301,7 @@ class SettingsController extends ChangeNotifier {
   void save() {
     _upsertSetting(_nasPathsKey, jsonEncode(_nasPaths));
     _upsertSetting(_nasPathKey, nasPath);
-
-    if (_perDeviceEffect) {
-      _upsertSetting(_deviceEffectKey, _effectMode.toStorage());
-    } else {
-      _databaseService.instance.execute(
-        'DELETE FROM app_settings WHERE key = ?;',
-        [_deviceEffectKey],
-      );
-      _upsertSetting(_globalEffectKey, _effectMode.toStorage());
-    }
+    _persistEffectMode();
 
     _upsertSetting(
       _subtitlesDefaultKey,

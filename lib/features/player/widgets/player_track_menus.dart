@@ -51,7 +51,10 @@ class _AudioTrackMenu extends StatelessWidget {
     return PopupMenuButton<Object>(
       tooltip: AppStrings.playerAudioTrackTooltip,
       icon: const Icon(Icons.audiotrack),
+      onOpened: () => controller.setMenuOrDialogOpen(true),
+      onCanceled: () => controller.setMenuOrDialogOpen(false),
       onSelected: (value) {
+        controller.setMenuOrDialogOpen(false);
         if (value is AudioTrack) {
           controller.selectAudioTrack(value);
         } else if (value == _AudioAction.nightMode) {
@@ -135,7 +138,10 @@ class _SubtitleTrackMenu extends StatelessWidget {
     return PopupMenuButton<Object>(
       tooltip: AppStrings.playerSubtitleTrackTooltip,
       icon: const Icon(Icons.subtitles),
+      onOpened: () => controller.setMenuOrDialogOpen(true),
+      onCanceled: () => controller.setMenuOrDialogOpen(false),
       onSelected: (value) {
+        controller.setMenuOrDialogOpen(false);
         if (value is SubtitleTrack) {
           controller.selectSubtitleTrack(value);
         } else if (value == _SubtitleAction.off) {
@@ -145,13 +151,14 @@ class _SubtitleTrackMenu extends StatelessWidget {
             AppStrings.playerPickSubtitleDialogTitle,
           );
         } else if (value == _SubtitleAction.openStyle) {
+          controller.setMenuOrDialogOpen(true);
           showDialog<void>(
             context: context,
             builder: (_) => PlayerSubtitleStyleDialog(
               controller: controller,
               effectMode: effectMode,
             ),
-          );
+          ).whenComplete(() => controller.setMenuOrDialogOpen(false));
         }
       },
       itemBuilder: (context) => [
@@ -216,6 +223,8 @@ class _SleepTimerMenu extends StatelessWidget {
     final active = controller.sleepTimerOption;
     return PopupMenuButton<SleepTimerOption>(
       tooltip: AppStrings.playerSleepTimerTooltip,
+      onOpened: () => controller.setMenuOrDialogOpen(true),
+      onCanceled: () => controller.setMenuOrDialogOpen(false),
       icon: Icon(
         Icons.bedtime_outlined,
         size: AppSpacing.iconSizeMd,
@@ -223,7 +232,10 @@ class _SleepTimerMenu extends StatelessWidget {
             ? AppColors.sapphireBright
             : AppColors.textPrimary,
       ),
-      onSelected: controller.setSleepTimer,
+      onSelected: (opt) {
+        controller.setMenuOrDialogOpen(false);
+        controller.setSleepTimer(opt);
+      },
       itemBuilder: (context) => SleepTimerOption.values
           .map(
             (opt) => PopupMenuItem<SleepTimerOption>(
@@ -249,13 +261,18 @@ class _PlaybackSpeedMenu extends StatelessWidget {
     final currentSpeed = controller.playbackSpeed;
     return PopupMenuButton<double>(
       tooltip: AppStrings.playerSpeedTooltip,
-      onSelected: controller.setPlaybackSpeed,
+      onOpened: () => controller.setMenuOrDialogOpen(true),
+      onCanceled: () => controller.setMenuOrDialogOpen(false),
+      onSelected: (speed) {
+        controller.setMenuOrDialogOpen(false);
+        controller.setPlaybackSpeed(speed);
+      },
       itemBuilder: (context) => AppSpacing.playbackSpeeds
           .map(
             (speed) => PopupMenuItem<double>(
               value: speed,
               child: Text(
-                Formatters.formatSubtitleScale(speed),
+                Formatters.formatPlaybackSpeed(speed),
                 style: TextStyle(
                   color: speed == currentSpeed
                       ? AppColors.sapphireBright
@@ -274,7 +291,7 @@ class _PlaybackSpeedMenu extends StatelessWidget {
           vertical: AppSpacing.xs,
         ),
         child: Text(
-          Formatters.formatSubtitleScale(currentSpeed),
+          Formatters.formatPlaybackSpeed(currentSpeed),
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: AppColors.textPrimary,
                 fontWeight: FontWeight.w600,

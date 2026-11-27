@@ -19,6 +19,22 @@ class ScannedSeriesData {
   final List<ParsedEpisode> episodes;
 }
 
+class ScannedMovieData {
+  const ScannedMovieData({
+    required this.title,
+    required this.releaseYear,
+    required this.filePath,
+    required this.posterPath,
+    required this.syncKey,
+  });
+
+  final String title;
+  final int? releaseYear;
+  final String filePath;
+  final String? posterPath;
+  final String syncKey;
+}
+
 class ScanOutput {
   const ScanOutput({
     required this.nasReachable,
@@ -30,7 +46,7 @@ class ScanOutput {
   final bool nasReachable;
   final List<String> reachableRoots;
   final List<ScannedSeriesData> seriesList;
-  final List<ParsedMovie> movies;
+  final List<ScannedMovieData> movies;
 }
 
 class NasScanRepository {
@@ -45,7 +61,7 @@ class NasScanRepository {
     return (seriesRow['cnt'] as int, moviesRow['cnt'] as int);
   }
 
-  void applyDiff(ScanOutput output) {
+  List<String> applyDiff(ScanOutput output) {
     final db = _databaseService.instance;
     db.execute('BEGIN TRANSACTION;');
 
@@ -97,11 +113,13 @@ class NasScanRepository {
             [ep.filePath],
           );
 
+          final syncKey = ep.syncKey.isEmpty ? null : ep.syncKey;
+
           if (existingEp.isEmpty) {
             db.execute(
               '''
-              INSERT INTO episodes (series_id, season_id, episode_number, title, file_path)
-              VALUES (?, ?, ?, ?, ?);
+              INSERT INTO episodes (series_id, season_id, episode_number, title, file_path, sync_key)
+              VALUES (?, ?, ?, ?, ?, ?);
               ''',
               [
                 seriesId,
@@ -109,13 +127,14 @@ class NasScanRepository {
                 ep.episodeNumber,
                 ep.episodeTitle,
                 ep.filePath,
+                syncKey,
               ],
             );
           } else {
             db.execute(
               '''
               UPDATE episodes
-              SET series_id = ?, season_id = ?, episode_number = ?, title = ?
+              SET series_id = ?, season_id = ?, episode_number = ?, title = ?, sync_key = COALESCE(?, sync_key)
               WHERE file_path = ?;
               ''',
               [
@@ -123,6 +142,7 @@ class NasScanRepository {
                 seasonId,
                 ep.episodeNumber,
                 ep.episodeTitle,
+                syncKey,
                 ep.filePath,
               ],
             );
@@ -132,18 +152,25 @@ class NasScanRepository {
 
       for (final movie in output.movies) {
         activeMoviePaths.add(movie.filePath);
-        final posterPath = findLocalPosterNearFile(movie.filePath);
+        final syncKey = movie.syncKey.isEmpty ? null : movie.syncKey;
 
         db.execute(
           '''
-          INSERT INTO movies (title, release_year, file_path, poster_path)
-          VALUES (?, ?, ?, ?)
+          INSERT INTO movies (title, release_year, file_path, poster_path, sync_key)
+          VALUES (?, ?, ?, ?, ?)
           ON CONFLICT(file_path) DO UPDATE SET
             title = excluded.title,
             release_year = excluded.release_year,
-            poster_path = COALESCE(excluded.poster_path, movies.poster_path);
+            poster_path = COALESCE(excluded.poster_path, movies.poster_path),
+            sync_key = COALESCE(excluded.sync_key, movies.sync_key);
           ''',
-          [movie.title, movie.releaseYear, movie.filePath, posterPath],
+          [
+            movie.title,
+            movie.releaseYear,
+            movie.filePath,
+            movie.posterPath,
+            syncKey,
+          ],
         );
       }
 
@@ -185,17 +212,7 @@ class NasScanRepository {
       );
 
       db.execute('COMMIT;');
-
-      for (final thumbPath in orphanedThumbs) {
-        try {
-          final thumbFile = File(thumbPath);
-          if (thumbFile.existsSync()) {
-            thumbFile.deleteSync();
-          }
-        } on FileSystemException {
-          // Gesperrte Cache-Datei ignorieren
-        }
-      }
+      return orphanedThumbs;
     } catch (_) {
       db.execute('ROLLBACK;');
       rethrow;

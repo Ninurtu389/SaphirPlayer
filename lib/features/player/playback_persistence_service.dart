@@ -25,6 +25,24 @@ class PlaybackPersistenceService {
     _activeHistoryDayKey = null;
   }
 
+  int loadResumePositionMs(String mediaKey) =>
+      loadSavedResumePositionMs(mediaKey) ?? 0;
+
+  int? loadSavedResumePositionMs(String mediaKey) {
+    final db = _databaseService.instance;
+    final rows = db.select(
+      'SELECT position_ms, completed FROM watch_progress WHERE media_key = ? LIMIT 1;',
+      [mediaKey],
+    );
+    if (rows.isEmpty) {
+      return null;
+    }
+    if ((rows.first['completed'] as int?) == 1) {
+      return 0;
+    }
+    return (rows.first['position_ms'] as int?) ?? 0;
+  }
+
   ({String? audioTrack, String? subtitleTrack, int introSkipSeconds})?
       loadSeriesPreferences(int seriesId) {
     final db = _databaseService.instance;
@@ -247,21 +265,30 @@ class PlaybackPersistenceService {
       ],
     );
 
+    if (durationMs > 0) {
+      if (entry.mediaType == 'episode') {
+        db.execute(
+          "UPDATE episodes SET duration_ms = ? WHERE COALESCE(NULLIF(sync_key, ''), 'episode_' || id) = ? AND duration_ms = 0;",
+          [durationMs, entry.mediaKey],
+        );
+      } else if (entry.mediaType == 'movie') {
+        db.execute(
+          "UPDATE movies SET duration_ms = ? WHERE COALESCE(NULLIF(sync_key, ''), 'movie_' || id) = ? AND duration_ms = 0;",
+          [durationMs, entry.mediaKey],
+        );
+      }
+    }
+
     if (entry.seriesId != null) {
       db.execute(
         'UPDATE series SET last_watched_at = ? WHERE id = ?;',
         [nowMs, entry.seriesId],
       );
-    } else if (entry.mediaType == 'movie' &&
-        entry.mediaKey.startsWith('movie_')) {
-      final movieId =
-          int.tryParse(entry.mediaKey.substring('movie_'.length));
-      if (movieId != null) {
-        db.execute(
-          'UPDATE movies SET last_watched_at = ? WHERE id = ?;',
-          [nowMs, movieId],
-        );
-      }
+    } else if (entry.mediaType == 'movie') {
+      db.execute(
+        "UPDATE movies SET last_watched_at = ? WHERE COALESCE(NULLIF(sync_key, ''), 'movie_' || id) = ?;",
+        [nowMs, entry.mediaKey],
+      );
     }
   }
 }

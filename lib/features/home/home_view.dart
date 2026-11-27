@@ -4,6 +4,7 @@ import '../../core/constants/app_spacing.dart';
 import '../../core/constants/app_strings.dart';
 import '../../core/services/local_file_service.dart';
 import '../../core/theme/effect_mode.dart';
+import '../../core/utils/formatters.dart';
 import '../library/library_models.dart';
 import 'home_controller.dart';
 import 'widgets/media_rail.dart';
@@ -218,9 +219,10 @@ class _HeroOverlayContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final infoText = hero.remainingMinutes > 0
-        ? '${hero.subtitle} · ${hero.remainingMinutes} ${AppStrings.remainingMinutesSuffix}'
-        : hero.subtitle;
+    final infoText = Formatters.formatHeroInfoLine(
+      hero.subtitle,
+      hero.remainingMinutes,
+    );
 
     return Padding(
       padding: const EdgeInsets.symmetric(

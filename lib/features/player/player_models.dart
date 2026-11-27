@@ -92,6 +92,9 @@ class PlayerWindowAdapter {
     Future<Rect> Function()? getWindowBounds,
     Future<void> Function(Rect bounds)? setWindowBounds,
     Future<void> Function(Size size)? setWindowMinimumSize,
+    Future<bool> Function()? isWindowMaximized,
+    Future<void> Function()? unmaximizeWindow,
+    Future<void> Function()? maximizeWindow,
     Future<String?> Function(String dialogTitle)? pickSubtitleFile,
     Future<void> Function()? startWindowDragging,
   })  : _setFullScreen = setFullScreen,
@@ -99,6 +102,9 @@ class PlayerWindowAdapter {
         _getWindowBounds = getWindowBounds,
         _setWindowBounds = setWindowBounds,
         _setWindowMinimumSize = setWindowMinimumSize,
+        _isWindowMaximized = isWindowMaximized,
+        _unmaximizeWindow = unmaximizeWindow,
+        _maximizeWindow = maximizeWindow,
         _pickSubtitleFile = pickSubtitleFile,
         _startWindowDragging = startWindowDragging;
 
@@ -107,6 +113,9 @@ class PlayerWindowAdapter {
   final Future<Rect> Function()? _getWindowBounds;
   final Future<void> Function(Rect bounds)? _setWindowBounds;
   final Future<void> Function(Size size)? _setWindowMinimumSize;
+  final Future<bool> Function()? _isWindowMaximized;
+  final Future<void> Function()? _unmaximizeWindow;
+  final Future<void> Function()? _maximizeWindow;
   final Future<String?> Function(String dialogTitle)? _pickSubtitleFile;
   final Future<void> Function()? _startWindowDragging;
 
@@ -126,6 +135,15 @@ class PlayerWindowAdapter {
       (_setWindowMinimumSize ?? DesktopPlatformService.setWindowMinimumSize)(
         size,
       );
+
+  Future<bool> isWindowMaximized() =>
+      (_isWindowMaximized ?? DesktopPlatformService.isWindowMaximized)();
+
+  Future<void> unmaximizeWindow() =>
+      (_unmaximizeWindow ?? DesktopPlatformService.unmaximizeWindow)();
+
+  Future<void> maximizeWindow() =>
+      (_maximizeWindow ?? DesktopPlatformService.maximizeWindow)();
 
   Future<String?> pickSubtitleFile(String dialogTitle) =>
       (_pickSubtitleFile ?? DesktopPlatformService.pickSubtitleFile)(

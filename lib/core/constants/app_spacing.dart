@@ -88,6 +88,10 @@ class AppSpacing {
 
   static const int staleDaysDefault = 60;
   static const double thumbnailSeekRatio = 0.15;
+  static const int ffmpegTimeoutSeconds = 10;
+  static const int thumbnailShortVideoSeekSeconds = 1;
+  static const int thumbnailShortVideoThresholdSeconds = 30;
+  static const int thumbnailSeekWaitTimeoutMs = 2500;
   static const int millisecondsPerSecond = 1000;
   static const int secondsPerMinute = 60;
   static const int secondsPerHour = 3600;
@@ -143,6 +147,8 @@ class AppSpacing {
   static const int sleepTimer30Minutes = 30;
   static const int sleepTimer60Minutes = 60;
   static const int sleepTimerTickSeconds = 30;
+  static const int searchDebounceMs = 180;
+  static const int statusMessageAutoClearSeconds = 4;
 
   static const double miniPlayerWidth = 480.0;
   static const double miniPlayerHeight = 270.0;

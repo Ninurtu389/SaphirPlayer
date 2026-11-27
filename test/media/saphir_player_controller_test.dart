@@ -35,7 +35,7 @@ void main() {
     controller = SaphirPlayerController(
       env.dbService,
       syncService,
-      () => mediaDir.path,
+      () => [mediaDir.path],
       settingsController: settingsController,
       player: harness.player,
       videoController: harness.videoController,
@@ -71,7 +71,8 @@ void main() {
     );
   }
 
-  test('subtitle priority: series preference overrides global setting', () async {
+  test('subtitle priority: series preference overrides global setting and passive emitTrack preserves global defaults',
+      () async {
     final ep1 = createSyntheticMp4HeaderFile(mediaDir, 'ep1.mp4');
     settingsController.updateSubtitlesDefaultEnabled(true);
     settingsController.updatePreferredSubtitleLanguage(AppStrings.subtitleLangCodeEn);
@@ -85,8 +86,15 @@ void main() {
       audio: [AudioTrack.auto()],
       subtitle: [SubtitleTrack.auto(), subDe, subEn],
     ));
+    // Passive stream.track emission must NOT write series_preferences
+    harness.emitTrack(Track(audio: AudioTrack.auto(), subtitle: subEn));
     await Future<void>.delayed(Duration.zero);
     expect(harness.selectedSubtitleTracks.last.id, 'eng');
+    expect(
+      env.dbService.instance
+          .select('SELECT * FROM series_preferences WHERE series_id = 1;'),
+      isEmpty,
+    );
 
     // Now save series preference to Deutsch -> overrides global English
     env.dbService.instance.execute(
@@ -109,6 +117,10 @@ void main() {
     await controller.toggleNightMode();
     expect(controller.isNightMode, isTrue);
     expect(bridge.nightModeHistory, [true]);
+    expect(bridge.commands.last, ['af', 'add', 'lavfi=[dynaudnorm=f=150:g=15]']);
+
+    await controller.toggleNightMode();
+    expect(bridge.commands.last, ['af', 'remove', 'lavfi=[dynaudnorm=f=150:g=15]']);
 
     await controller.toggleVolumeBoost();
     expect(controller.isVolumeBoostEnabled, isTrue);
@@ -124,6 +136,7 @@ void main() {
     await controller.cycleAspectMode();
     expect(controller.aspectMode, VideoAspectMode.fillCrop);
     expect(bridge.properties['panscan'], '1.0');
+    expect(bridge.properties['video-aspect-override'], 'no');
     await controller.setAspectMode(VideoAspectMode.ratio21x9);
     expect(bridge.properties['video-aspect-override'], '21:9');
 
@@ -146,24 +159,42 @@ void main() {
     expect(bridge.subtitleStyleHistory.last.pos, 80);
   });
 
-  test('chapters, intro skip, bookmarks, and 1-click screenshot', () async {
+  test('chapters, intro skip, dismissIntroSkip, bookmarks, and 1-click screenshot',
+      () async {
     final ep1 = createSyntheticMp4HeaderFile(mediaDir, 'ep1.mp4');
+    final ep2 = createSyntheticMp4HeaderFile(mediaDir, 'ep2.mp4');
+    env.dbService.instance.execute(
+      "UPDATE watch_progress SET position_ms = 0 WHERE media_key = 'episode_1';",
+    );
     bridge.chaptersToReturn = const [
-      PlayerChapter(index: 0, title: 'Intro', startMs: 0),
-      PlayerChapter(index: 1, title: 'Handlung', startMs: 85000),
+      PlayerChapter(index: 0, title: 'Part 1', startMs: 0),
+      PlayerChapter(index: 1, title: 'Intro', startMs: 15000),
+      PlayerChapter(index: 2, title: 'Handlung', startMs: 85000),
     ];
 
-    await controller.startSession(makeEpisodeSession([ep1.path]));
+    await controller.startSession(makeEpisodeSession([ep1.path, ep2.path]));
     harness.emitDuration(const Duration(minutes: 30));
     harness.emitPosition(const Duration(seconds: 20));
     await Future<void>.delayed(const Duration(milliseconds: 20));
 
-    expect(controller.chapters.length, 2);
+    expect(controller.chapters.length, 3);
     expect(controller.showIntroSkipButton, isTrue);
 
     await controller.skipIntro();
     expect(harness.seekTargets.last, const Duration(milliseconds: 85000));
     expect(controller.showIntroSkipButton, isFalse);
+
+    // Test dismissIntroSkip without seeking
+    await controller.playNextEpisode();
+    harness.emitDuration(const Duration(minutes: 30));
+    harness.emitPosition(const Duration(seconds: 10));
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    final prevSeekCount = harness.seekTargets.length;
+    expect(controller.showIntroSkipButton, isTrue);
+    controller.dismissIntroSkip();
+    expect(controller.showIntroSkipButton, isFalse);
+    expect(harness.seekTargets.length, prevSeekCount);
+
     controller.setSeriesIntroSkipSeconds(90);
     expect(controller.seriesIntroSkipSeconds, 90);
 
@@ -180,11 +211,15 @@ void main() {
     expect(shotPath.startsWith(shotDir), isTrue);
   });
 
-  test('episode drawer switch, sleep timer, mini-player, OSD, and diagnostics',
+  test('episode drawer switch, sleep timer, mini-player from maximized, hwdec, and stopAndClose reset',
       () async {
     final ep1 = createSyntheticMp4HeaderFile(mediaDir, 'ep1.mp4');
     final ep2 = createSyntheticMp4HeaderFile(mediaDir, 'ep2.mp4');
+
+    settingsController.updateHardwareAcceleration(false);
     await controller.startSession(makeEpisodeSession([ep1.path, ep2.path]));
+    expect(bridge.hwdecHistory.last, isFalse);
+
     harness.emitDuration(const Duration(seconds: 100));
     harness.emitPosition(const Duration(seconds: 95));
     await Future<void>.delayed(Duration.zero);
@@ -220,20 +255,42 @@ void main() {
     controller.toggleDiagnostics();
     expect(controller.showDiagnostics, isFalse);
 
-    // Mini-player saves and restores bounds & alwaysOnTop on stopAndClose
+    // Set non-default speed/delays/aspect before mini-player & close
+    await controller.setPlaybackSpeed(1.5);
+    await controller.adjustAudioDelay(200);
+    await controller.adjustSubtitleDelay(-100);
+    await controller.setAspectMode(VideoAspectMode.ratio16x9);
+
+    // Mini-player from maximized state unmaximizes on enter and restores maximize on close
+    harness.isWindowMaximizedState = true;
     await controller.toggleMiniPlayer();
     expect(controller.isMiniPlayer, isTrue);
+    expect(harness.unmaximizeCount, 1);
     expect(harness.alwaysOnTopStates.last, isTrue);
+
     await controller.stopAndClose();
     expect(controller.isMiniPlayer, isFalse);
+    expect(harness.maximizeCount, 1);
     expect(harness.alwaysOnTopStates.last, isFalse);
     expect(harness.windowBoundsHistory.last, const Rect.fromLTWH(100, 100, 1280, 800));
+    expect(controller.playbackSpeed, 1.0);
+    expect(controller.audioDelayMs, 0);
+    expect(controller.subtitleDelayMs, 0);
+    expect(controller.aspectMode, VideoAspectMode.original);
+    expect(controller.progressListenable.value.position, Duration.zero);
+    expect(controller.progressListenable.value.duration, Duration.zero);
   });
 
-  test('intro skip button hides after configured seconds and resume sets Media.start',
+  test('intro skip hides after configured seconds, progressListenable decouples position notifications, and duration_ms backfills',
       () async {
     final ep1 = createSyntheticMp4HeaderFile(mediaDir, 'ep1.mp4');
     final ep2 = createSyntheticMp4HeaderFile(mediaDir, 'ep2.mp4');
+    env.dbService.instance.execute(
+      "UPDATE watch_progress SET position_ms = 120000 WHERE media_key = 'episode_1';",
+    );
+    env.dbService.instance.execute(
+      'UPDATE episodes SET duration_ms = 0 WHERE id = 2;',
+    );
 
     await controller.startSession(
       PlaybackSession(
@@ -269,12 +326,39 @@ void main() {
     expect(harness.openedMedia.last.start, isNull);
     controller.setSeriesIntroSkipSeconds(60);
     harness.emitDuration(const Duration(minutes: 30));
-    harness.emitPosition(const Duration(seconds: 40));
     await Future<void>.delayed(Duration.zero);
+
+    // Count controller notifications while emitting position ticks within intro window
+    var notifyCount = 0;
+    controller.addListener(() => notifyCount++);
+    harness.emitPosition(const Duration(seconds: 40));
+    harness.emitPosition(const Duration(seconds: 40, milliseconds: 100));
+    harness.emitPosition(const Duration(seconds: 40, milliseconds: 200));
+    await Future<void>.delayed(Duration.zero);
+    expect(notifyCount, 0);
+    expect(controller.progressListenable.value.position, const Duration(seconds: 40));
     expect(controller.showIntroSkipButton, isTrue);
+
+    harness.emitPosition(const Duration(seconds: 41));
+    await Future<void>.delayed(Duration.zero);
+    expect(notifyCount, 0);
+    expect(controller.progressListenable.value.position, const Duration(seconds: 41));
 
     harness.emitPosition(const Duration(seconds: 60));
     await Future<void>.delayed(Duration.zero);
+    expect(notifyCount, 1);
     expect(controller.showIntroSkipButton, isFalse);
+
+    // setMenuOrDialogOpen keeps HUD open while playing
+    controller.setMenuOrDialogOpen(true);
+    expect(controller.isHudVisible, isTrue);
+    controller.setMenuOrDialogOpen(false);
+
+    // stopAndClose persists duration_ms back into episodes table when previously 0
+    await controller.stopAndClose();
+    final ep2Dur = env.dbService.instance
+        .select('SELECT duration_ms FROM episodes WHERE id = 2;')
+        .first['duration_ms'];
+    expect(ep2Dur, const Duration(minutes: 30).inMilliseconds);
   });
 }

@@ -6,11 +6,46 @@ import 'package:path_provider/path_provider.dart';
 class PortablePaths {
   PortablePaths._();
 
+  static String? _testBaseDirectoryOverride;
+  static String? _cachedThumbDir;
+
   @visibleForTesting
-  static String? testBaseDirectoryOverride;
+  static String? get testBaseDirectoryOverride => _testBaseDirectoryOverride;
+
+  @visibleForTesting
+  static set testBaseDirectoryOverride(String? value) {
+    _testBaseDirectoryOverride = value;
+    _cachedThumbDir = null;
+  }
+
+  static Future<void> warmUp() async {
+    _cachedThumbDir = await getCacheDirectory();
+  }
+
+  static String? resolveThumbnailPath(String? storedPath) {
+    if (storedPath == null) {
+      return null;
+    }
+    final trimmed = storedPath.trim();
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    if (p.isAbsolute(trimmed)) {
+      return trimmed;
+    }
+    final cachedDir = _cachedThumbDir;
+    if (cachedDir != null && cachedDir.isNotEmpty) {
+      return p.join(cachedDir, trimmed);
+    }
+    final override = _testBaseDirectoryOverride;
+    if (override != null && override.isNotEmpty) {
+      return p.join(override, 'cache', 'thumbnails', trimmed);
+    }
+    return trimmed;
+  }
 
   static Future<String> resolveBaseDirectory() async {
-    final override = testBaseDirectoryOverride;
+    final override = _testBaseDirectoryOverride;
     if (override != null && override.isNotEmpty) {
       return override;
     }
@@ -42,6 +77,7 @@ class PortablePaths {
     if (!await dir.exists()) {
       await dir.create(recursive: true);
     }
+    _cachedThumbDir = dir.path;
     return dir.path;
   }
 

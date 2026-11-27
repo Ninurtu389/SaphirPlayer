@@ -7,6 +7,7 @@ import 'package:saphir_player/core/constants/app_strings.dart';
 import 'package:saphir_player/core/controllers/library_controller.dart';
 import 'package:saphir_player/core/controllers/settings_controller.dart';
 import 'package:saphir_player/core/storage/progress_sync_service.dart';
+import 'package:saphir_player/core/storage/sync_key_utils.dart';
 import 'package:saphir_player/core/theme/app_theme.dart';
 import 'package:saphir_player/features/home/home_controller.dart';
 import 'package:saphir_player/features/player/saphir_player_controller.dart';
@@ -49,7 +50,7 @@ void main() {
     playerController = SaphirPlayerController(
       env.dbService,
       syncService,
-      () => settingsController.nasPath,
+      () => settingsController.nasPaths,
       player: harness.player,
       videoController: harness.videoController,
       onSetFullScreen: harness.onSetFullScreen,
@@ -164,7 +165,12 @@ void main() {
     final decoded =
         jsonDecode(syncFile.readAsStringSync()) as Map<String, dynamic>;
     final entries = decoded['entries'] as Map<String, dynamic>;
-    expect(entries.containsKey('episode_1'), isTrue);
+    final expectedSyncKey = SyncKeyUtils.buildStableSyncKey(
+      'ep',
+      p.join(nasRoot.path, 'Andor', 'Season 1', 'Andor - S01E01 - Kassa.mp4'),
+      nasRoot.path,
+    );
+    expect(entries.containsKey(expectedSyncKey), isTrue);
 
     // 5. Verify Stats tab reflects completed episode
     await tester.tap(find.text(AppStrings.statsTab));

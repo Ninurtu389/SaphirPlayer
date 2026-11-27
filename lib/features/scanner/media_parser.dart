@@ -1,4 +1,6 @@
 import 'package:path/path.dart' as p;
+import '../../core/constants/app_strings.dart';
+import '../../core/storage/sync_key_utils.dart';
 
 class ParsedEpisode {
   const ParsedEpisode({
@@ -7,6 +9,7 @@ class ParsedEpisode {
     required this.episodeNumber,
     required this.episodeTitle,
     required this.filePath,
+    this.syncKey = '',
   });
 
   final String seriesTitle;
@@ -14,6 +17,7 @@ class ParsedEpisode {
   final int episodeNumber;
   final String episodeTitle;
   final String filePath;
+  final String syncKey;
 }
 
 class ParsedMovie {
@@ -21,11 +25,13 @@ class ParsedMovie {
     required this.title,
     required this.releaseYear,
     required this.filePath,
+    this.syncKey = '',
   });
 
   final String title;
   final int? releaseYear;
   final String filePath;
+  final String syncKey;
 }
 
 class MediaParser {
@@ -40,6 +46,12 @@ class MediaParser {
     '.m4v',
     '.webm',
     '.ts',
+    '.m2ts',
+    '.mpg',
+    '.mpeg',
+    '.vob',
+    '.flv',
+    '.ogv',
   };
 
   static const Set<String> imageExtensions = {
@@ -47,6 +59,13 @@ class MediaParser {
     '.jpeg',
     '.png',
     '.webp',
+  };
+
+  static const Set<(int, int)> _excludedAspectRatios = {
+    (16, 9),
+    (4, 3),
+    (4, 4),
+    (21, 9),
   };
 
   static final RegExp _sxxExxPattern = RegExp(
@@ -67,7 +86,7 @@ class MediaParser {
   );
 
   static final RegExp _exxPattern = RegExp(
-    r'(?<![a-zA-Z0-9])(?:episode|folge|ep?)[\s._-]*(\d{1,3})(?![a-zA-Z0-9])',
+    r'(?<![a-zA-Z0-9])(?:episode|folge|ep)[\s._-]*(\d{1,3})(?![a-zA-Z0-9])',
     caseSensitive: false,
   );
 
@@ -89,6 +108,27 @@ class MediaParser {
 
   static final RegExp _yearPattern = RegExp(r'\b(19\d{2}|20\d{2})\b');
 
+  static String buildStableSyncKey(
+    String prefix,
+    String filePath,
+    String rootPath,
+  ) {
+    return SyncKeyUtils.buildStableSyncKey(prefix, filePath, rootPath);
+  }
+
+  static Match? _findValidXMatch(String text) {
+    for (final match in _xPattern.allMatches(text)) {
+      final first = int.tryParse(match.group(1) ?? '');
+      final second = int.tryParse(match.group(2) ?? '');
+      if (first != null &&
+          second != null &&
+          !_excludedAspectRatios.contains((first, second))) {
+        return match;
+      }
+    }
+    return null;
+  }
+
   static bool isNonSeriesSubfolder(String segment) {
     final trimmed = segment.trim();
     if (trimmed.isEmpty) {
@@ -98,7 +138,7 @@ class MediaParser {
         _numericFolderPattern.hasMatch(trimmed) ||
         _technicalSubfolderPattern.hasMatch(trimmed) ||
         _sxxExxPattern.hasMatch(trimmed) ||
-        _xPattern.hasMatch(trimmed) ||
+        _findValidXMatch(trimmed) != null ||
         _exxPattern.hasMatch(trimmed);
   }
 
@@ -133,7 +173,7 @@ class MediaParser {
         episodeNum = int.tryParse(textMatch.group(2) ?? '');
         episodeMatch = textMatch;
       } else {
-        final xMatch = _xPattern.firstMatch(baseName);
+        final xMatch = _findValidXMatch(baseName);
         if (xMatch != null) {
           seasonNum = int.tryParse(xMatch.group(1) ?? '');
           episodeNum = int.tryParse(xMatch.group(2) ?? '');
@@ -184,6 +224,7 @@ class MediaParser {
       episodeNumber: episodeNum,
       episodeTitle: episodeTitle,
       filePath: filePath,
+      syncKey: buildStableSyncKey('ep', filePath, rootFolderPath),
     );
   }
 
@@ -240,6 +281,7 @@ class MediaParser {
       title: title.isEmpty ? baseName : title,
       releaseYear: releaseYear,
       filePath: filePath,
+      syncKey: buildStableSyncKey('mv', filePath, rootFolderPath),
     );
   }
 
@@ -287,7 +329,7 @@ class MediaParser {
         return cleaned;
       }
     }
-    return 'Folge $episodeNumber';
+    return '${AppStrings.episodeFallbackPrefix} $episodeNumber';
   }
 
   static String _cleanTitle(String raw) {

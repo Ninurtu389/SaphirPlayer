@@ -15,11 +15,13 @@ void main() {
       final emptyFile = createEmptyVideoFile(mediaDir, 'empty.mp4');
       final validStub = createSyntheticMp4HeaderFile(mediaDir, 'stub.mp4');
 
+      ThumbnailGeneratorService.resetExecutableCacheForTesting();
+
       expect(
         await ThumbnailGeneratorService.generateThumbnail(
           videoFilePath: validStub.path,
           durationMs: 60000,
-          isPlaybackActive: true,
+          isPlaybackActive: () => true,
           allowMediaKitFallback: false,
         ),
         isNull,
@@ -29,7 +31,7 @@ void main() {
         await ThumbnailGeneratorService.generateThumbnail(
           videoFilePath: p.join(mediaDir.path, 'missing.mp4'),
           durationMs: 60000,
-          isPlaybackActive: false,
+          isPlaybackActive: () => false,
           allowMediaKitFallback: false,
         ),
         isNull,
@@ -39,7 +41,7 @@ void main() {
         await ThumbnailGeneratorService.generateThumbnail(
           videoFilePath: emptyFile.path,
           durationMs: 60000,
-          isPlaybackActive: false,
+          isPlaybackActive: () => false,
           allowMediaKitFallback: false,
         ),
         isNull,
@@ -60,7 +62,7 @@ void main() {
       final first = await ThumbnailGeneratorService.generateEpisodeThumbnail(
         videoFilePath: stub.path,
         durationMs: 120000,
-        isPlaybackActive: false,
+        isPlaybackActive: () => false,
         allowMediaKitFallback: false,
       );
       expect(first, isNull);
@@ -73,7 +75,7 @@ void main() {
         await ThumbnailGeneratorService.generateThumbnail(
           videoFilePath: corruptFile.path,
           durationMs: 1000,
-          isPlaybackActive: false,
+          isPlaybackActive: () => false,
           allowMediaKitFallback: false,
         ),
         isNull,

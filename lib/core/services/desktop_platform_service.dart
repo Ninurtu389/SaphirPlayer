@@ -8,6 +8,9 @@ class DesktopPlatformService {
 
   static String get localHostname => Platform.localHostname;
 
+  static bool get _isDesktop =>
+      Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+
   static Future<String?> pickMediaDirectory(String dialogTitle) async {
     final selectedUri = await FilePicker.pickDirectory(
       dialogTitle: dialogTitle,
@@ -22,21 +25,6 @@ class DesktopPlatformService {
     return trimmed.isEmpty ? null : trimmed;
   }
 
-  static Future<void> startWindowDragging() => windowManager.startDragging();
-
-  static Future<void> setFullScreen(bool fullscreen) =>
-      windowManager.setFullScreen(fullscreen);
-
-  static Future<bool> isWindowMaximized() => windowManager.isMaximized();
-
-  static Future<void> minimizeWindow() => windowManager.minimize();
-
-  static Future<void> maximizeWindow() => windowManager.maximize();
-
-  static Future<void> unmaximizeWindow() => windowManager.unmaximize();
-
-  static Future<void> closeWindow() => windowManager.close();
-
   static Future<String?> pickSubtitleFile(String dialogTitle) async {
     final picked = await FilePicker.pickFile(
       dialogTitle: dialogTitle,
@@ -47,25 +35,91 @@ class DesktopPlatformService {
     return (path == null || path.isEmpty) ? null : path;
   }
 
-  static Future<void> setAlwaysOnTop(bool value) =>
-      windowManager.setAlwaysOnTop(value);
+  static void addWindowListener(WindowListener listener) {
+    if (_isDesktop) {
+      windowManager.addListener(listener);
+    }
+  }
 
-  static Future<Rect> getWindowBounds() => windowManager.getBounds();
+  static void removeWindowListener(WindowListener listener) {
+    if (_isDesktop) {
+      windowManager.removeListener(listener);
+    }
+  }
 
-  static Future<void> setWindowBounds(Rect bounds) =>
-      windowManager.setBounds(bounds);
+  static Future<void> setPreventClose(bool preventClose) async {
+    if (_isDesktop) {
+      await windowManager.setPreventClose(preventClose);
+    }
+  }
 
-  static Future<void> setWindowMinimumSize(Size size) =>
-      windowManager.setMinimumSize(size);
+  static Future<void> destroyWindow() async {
+    if (_isDesktop) {
+      await windowManager.destroy();
+    }
+  }
 
-  static Future<void> resetWindowDefaults(
-    Rect? bounds,
-    Size minSize,
-  ) async {
-    await windowManager.setAlwaysOnTop(false);
-    await windowManager.setMinimumSize(minSize);
-    if (bounds != null) {
+  static Future<void> startWindowDragging() async {
+    if (_isDesktop) {
+      await windowManager.startDragging();
+    }
+  }
+
+  static Future<void> setFullScreen(bool fullscreen) async {
+    if (_isDesktop) {
+      await windowManager.setFullScreen(fullscreen);
+    }
+  }
+
+  static Future<bool> isWindowMaximized() async {
+    if (!_isDesktop) return false;
+    return windowManager.isMaximized();
+  }
+
+  static Future<void> minimizeWindow() async {
+    if (_isDesktop) {
+      await windowManager.minimize();
+    }
+  }
+
+  static Future<void> maximizeWindow() async {
+    if (_isDesktop) {
+      await windowManager.maximize();
+    }
+  }
+
+  static Future<void> unmaximizeWindow() async {
+    if (_isDesktop) {
+      await windowManager.unmaximize();
+    }
+  }
+
+  static Future<void> closeWindow() async {
+    if (_isDesktop) {
+      await windowManager.close();
+    }
+  }
+
+  static Future<void> setAlwaysOnTop(bool value) async {
+    if (_isDesktop) {
+      await windowManager.setAlwaysOnTop(value);
+    }
+  }
+
+  static Future<Rect> getWindowBounds() async {
+    if (!_isDesktop) return Rect.zero;
+    return windowManager.getBounds();
+  }
+
+  static Future<void> setWindowBounds(Rect bounds) async {
+    if (_isDesktop) {
       await windowManager.setBounds(bounds);
+    }
+  }
+
+  static Future<void> setWindowMinimumSize(Size size) async {
+    if (_isDesktop) {
+      await windowManager.setMinimumSize(size);
     }
   }
 }

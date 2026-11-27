@@ -1,7 +1,17 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:window_manager/window_manager.dart';
+import '../../core/constants/app_spacing.dart';
+import '../../core/constants/app_strings.dart';
+import '../../core/controllers/library_controller.dart';
+import '../../core/controllers/settings_controller.dart';
 import '../../core/services/desktop_platform_service.dart';
+import '../../core/storage/database_service.dart';
+import '../home/home_controller.dart';
 import '../library/library_models.dart';
 import '../player/playback_session.dart';
+import '../player/saphir_player_controller.dart';
+import '../stats/stats_controller.dart';
 
 enum AppSection {
   home,
@@ -10,46 +20,296 @@ enum AppSection {
   settings,
 }
 
-class ShellController extends ChangeNotifier {
+class ShellController extends ChangeNotifier with WindowListener {
+  ShellController({
+    SettingsController? settingsController,
+    LibraryController? libraryController,
+    HomeController? homeController,
+    StatsController? statsController,
+    SaphirPlayerController? playerController,
+    DatabaseService? databaseService,
+  })  : _settingsController = settingsController,
+        _libraryController = libraryController,
+        _homeController = homeController,
+        _statsController = statsController,
+        _playerController = playerController,
+        _databaseService = databaseService;
+
+  SettingsController? _settingsController;
+  LibraryController? _libraryController;
+  HomeController? _homeController;
+  StatsController? _statsController;
+  SaphirPlayerController? _playerController;
+  DatabaseService? _databaseService;
+
   AppSection _activeSection = AppSection.home;
   bool _isMaximized = false;
   SeriesDetailData? _selectedSeriesDetail;
   PlaybackSession? _activePlaybackSession;
+  String? _statusMessage;
+  Timer? _searchDebounceTimer;
+  Timer? _statusClearTimer;
+  bool _isListenerAttached = false;
+  bool _isClosing = false;
+  bool _isDisposed = false;
 
   AppSection get activeSection => _activeSection;
   bool get isMaximized => _isMaximized;
   SeriesDetailData? get selectedSeriesDetail => _selectedSeriesDetail;
   PlaybackSession? get activePlaybackSession => _activePlaybackSession;
   bool get isPlayerOpen => _activePlaybackSession != null;
+  String? get statusMessage => _statusMessage;
+
+  void attachDependencies({
+    SettingsController? settingsController,
+    LibraryController? libraryController,
+    HomeController? homeController,
+    StatsController? statsController,
+    SaphirPlayerController? playerController,
+    DatabaseService? databaseService,
+  }) {
+    _settingsController ??= settingsController;
+    _libraryController ??= libraryController;
+    _homeController ??= homeController;
+    _statsController ??= statsController;
+    _playerController ??= playerController;
+    _databaseService ??= databaseService;
+  }
+
+  void attachWindowListener() {
+    if (_isListenerAttached) return;
+    _isListenerAttached = true;
+    DesktopPlatformService.addWindowListener(this);
+  }
+
+  void detachWindowListener() {
+    if (!_isListenerAttached) return;
+    _isListenerAttached = false;
+    DesktopPlatformService.removeWindowListener(this);
+  }
+
+  @override
+  void onWindowMaximize() {
+    if (!_isMaximized) {
+      _isMaximized = true;
+      _safeNotify();
+    }
+  }
+
+  @override
+  void onWindowUnmaximize() {
+    if (_isMaximized) {
+      _isMaximized = false;
+      _safeNotify();
+    }
+  }
+
+  @override
+  Future<void> onWindowClose() async {
+    if (_isClosing) return;
+    _isClosing = true;
+    try {
+      if (isPlayerOpen) {
+        await _playerController?.stopAndClose();
+      }
+      await _settingsController?.syncProgress();
+      _databaseService?.close();
+    } finally {
+      await DesktopPlatformService.destroyWindow();
+    }
+  }
 
   void selectSection(AppSection section) {
     _selectedSeriesDetail = null;
+    if (section == AppSection.stats) {
+      _statsController?.refreshStats();
+    }
     if (_activeSection == section) {
-      notifyListeners();
+      _safeNotify();
       return;
     }
     _activeSection = section;
-    notifyListeners();
+    _safeNotify();
   }
 
   void openSeriesDetail(SeriesDetailData detail) {
     _selectedSeriesDetail = detail;
-    notifyListeners();
+    _safeNotify();
   }
 
   void closeSeriesDetail() {
     _selectedSeriesDetail = null;
-    notifyListeners();
+    _safeNotify();
   }
 
   void openPlaybackSession(PlaybackSession session) {
     _activePlaybackSession = session;
-    notifyListeners();
+    _safeNotify();
   }
 
   void closePlaybackSession() {
     _activePlaybackSession = null;
-    notifyListeners();
+    _safeNotify();
+  }
+
+  void _setStatusMessage(String message) {
+    _statusClearTimer?.cancel();
+    _statusMessage = message;
+    _safeNotify();
+    _statusClearTimer = Timer(
+      const Duration(seconds: AppSpacing.statusMessageAutoClearSeconds),
+      () {
+        if (_isDisposed) return;
+        _statusMessage = null;
+        _safeNotify();
+      },
+    );
+  }
+
+  void _refreshAllViews() {
+    _libraryController?.loadCountsFromCache();
+    _homeController?.refreshHomeFeeds();
+    _statsController?.refreshStats();
+  }
+
+  void updateGlobalSearch(String query) {
+    _searchDebounceTimer?.cancel();
+    if (query.trim().isEmpty) {
+      _applyGlobalSearch(query);
+      return;
+    }
+    _searchDebounceTimer = Timer(
+      const Duration(milliseconds: AppSpacing.searchDebounceMs),
+      () {
+        if (!_isDisposed) {
+          _applyGlobalSearch(query);
+        }
+      },
+    );
+  }
+
+  void clearGlobalSearchImmediate() {
+    _searchDebounceTimer?.cancel();
+    _applyGlobalSearch('');
+  }
+
+  void _applyGlobalSearch(String query) {
+    _homeController?.updateSearchQuery(query);
+    _libraryController?.updateSearchQuery(query);
+    final hasQuery = query.trim().isNotEmpty;
+    if (hasQuery &&
+        (_selectedSeriesDetail != null ||
+            _activeSection == AppSection.settings ||
+            _activeSection == AppSection.stats)) {
+      selectSection(AppSection.library);
+      return;
+    }
+    _safeNotify();
+  }
+
+  Future<void> triggerScan() async {
+    await _libraryController?.syncAndRefreshLibrary();
+    _homeController?.refreshHomeFeeds();
+    _statsController?.refreshStats();
+  }
+
+  Future<void> handleSyncNow() async {
+    await _settingsController?.syncProgress();
+    _refreshAllViews();
+    _setStatusMessage(AppStrings.syncCompletedStatus);
+  }
+
+  Future<void> handleClearCache() async {
+    await _settingsController?.clearThumbnailCache();
+    _refreshAllViews();
+    _setStatusMessage(AppStrings.cacheClearedStatus);
+  }
+
+  Future<void> handleAddFolderFromPicker() async {
+    final added = await _settingsController?.pickAndAddFolder(
+      AppStrings.pickFolderDialogTitle,
+    );
+    if (added == null || _isDisposed) {
+      return;
+    }
+    _setStatusMessage(
+      added ? AppStrings.folderAddedStatus : AppStrings.folderDuplicateStatus,
+    );
+  }
+
+  bool handleAddFolderFromInput(String rawPath) {
+    final candidate = rawPath.trim();
+    if (candidate.isEmpty || _settingsController == null) {
+      return false;
+    }
+    final added = _settingsController!.addNasPath(candidate);
+    _setStatusMessage(
+      added ? AppStrings.folderAddedStatus : AppStrings.folderDuplicateStatus,
+    );
+    return added;
+  }
+
+  void handleRemoveFolder(String path) {
+    _settingsController?.removeNasPath(path);
+    _setStatusMessage(AppStrings.folderRemovedStatus);
+  }
+
+  Future<void> handleResetDatabase() async {
+    await _settingsController?.resetDatabase();
+    _libraryController?.resetLibraryState();
+    _homeController?.updateSearchQuery('');
+    _homeController?.refreshHomeFeeds();
+    _statsController?.refreshStats();
+    _setStatusMessage(AppStrings.databaseResetStatus);
+  }
+
+  void handleSaveSettings(String pendingInput) {
+    final trimmed = pendingInput.trim();
+    if (trimmed.isNotEmpty) {
+      _settingsController?.addNasPath(trimmed);
+    }
+    _settingsController?.save();
+    _setStatusMessage(AppStrings.savedStatus);
+  }
+
+  void openSeriesById(int seriesId) {
+    final detail = _homeController?.loadSeriesDetail(seriesId);
+    if (detail != null) {
+      openSeriesDetail(detail);
+    }
+  }
+
+  Future<void> launchPlayer(PlaybackSession session) async {
+    _libraryController?.setPlaybackActive(true);
+    openPlaybackSession(session);
+    await _playerController?.startSession(session);
+  }
+
+  void handlePlayerClosed() {
+    _libraryController?.setPlaybackActive(false);
+    closePlaybackSession();
+    _refreshAllViews();
+    final currentSeries = _selectedSeriesDetail;
+    if (currentSeries != null) {
+      openSeriesById(currentSeries.seriesId);
+    }
+  }
+
+  void handleToggleWatched(EpisodeEntry episode) {
+    _homeController?.toggleEpisodeWatchedLocal(episode);
+    _refreshAllViews();
+    final currentSeries = _selectedSeriesDetail;
+    if (currentSeries != null) {
+      openSeriesById(currentSeries.seriesId);
+    }
+  }
+
+  void handleRemoveFromContinueWatching(MediaCardItem item) {
+    _homeController?.removeFromContinueWatching(item);
+    _refreshAllViews();
+    if (_settingsController != null) {
+      unawaited(_settingsController!.syncProgress());
+    }
   }
 
   Future<void> startWindowDragging() =>
@@ -57,12 +317,10 @@ class ShellController extends ChangeNotifier {
 
   Future<void> syncMaximizedState() async {
     _isMaximized = await DesktopPlatformService.isWindowMaximized();
-    notifyListeners();
+    _safeNotify();
   }
 
-  Future<void> minimizeWindow() async {
-    await DesktopPlatformService.minimizeWindow();
-  }
+  Future<void> minimizeWindow() => DesktopPlatformService.minimizeWindow();
 
   Future<void> toggleMaximizeWindow() async {
     final maximized = await DesktopPlatformService.isWindowMaximized();
@@ -72,10 +330,29 @@ class ShellController extends ChangeNotifier {
       await DesktopPlatformService.maximizeWindow();
     }
     _isMaximized = !maximized;
-    notifyListeners();
+    _safeNotify();
   }
 
-  Future<void> closeWindow() async {
-    await DesktopPlatformService.closeWindow();
+  Future<void> closeWindow() => DesktopPlatformService.closeWindow();
+
+  void _safeNotify() {
+    if (!_isDisposed) {
+      notifyListeners();
+    }
+  }
+
+  void cancelPendingTimers() {
+    _searchDebounceTimer?.cancel();
+    _searchDebounceTimer = null;
+    _statusClearTimer?.cancel();
+    _statusClearTimer = null;
+  }
+
+  @override
+  void dispose() {
+    _isDisposed = true;
+    cancelPendingTimers();
+    detachWindowListener();
+    super.dispose();
   }
 }

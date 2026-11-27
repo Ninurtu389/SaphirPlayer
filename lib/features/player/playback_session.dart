@@ -38,7 +38,7 @@ class PlaybackSession {
     final queue = episodes
         .map(
           (ep) => PlaybackQueueEntry(
-            mediaKey: Formatters.episodeMediaKey(ep.id),
+            mediaKey: ep.mediaKey,
             mediaType: 'episode',
             title: seriesTitle,
             subtitle: Formatters.formatEpisodeSubtitle(

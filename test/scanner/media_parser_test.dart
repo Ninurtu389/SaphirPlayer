@@ -127,6 +127,29 @@ void main() {
       expect(parsed.releaseYear, 2024);
       expect(MediaParser.parseEpisode(file, root), isNull);
     });
+
+    test('does not misclassify WALL-E or aspect ratios (16x9, 4x3, 21x9, 4x4) as series',
+        () {
+      const root = r'D:\NAS\Filme';
+      for (final filename in [
+        'WALL-E 2008.mkv',
+        'Movie 16x9.mkv',
+        'Clip 4x3.mkv',
+        'Ultra 21x9.mkv',
+        'Offroad 4x4.mkv',
+      ]) {
+        final file = p.join(root, filename);
+        expect(
+          MediaParser.parseEpisode(file, root),
+          isNull,
+          reason: '$filename should be parsed as movie, not episode',
+        );
+      }
+
+      final walle = MediaParser.parseMovie(p.join(root, 'WALL-E 2008.mkv'), root);
+      expect(walle.title, 'WALL-E');
+      expect(walle.releaseYear, 2008);
+    });
   });
 
   group('MetadataReader', () {

@@ -40,6 +40,11 @@ class PlayerFeaturesDelegate {
   final Future<String?> Function(Uint8List bytes, String title) _onSaveScreenshot;
   final VoidCallback _onChanged;
 
+  static final RegExp _introChapterPattern = RegExp(
+    r'\b(?:intro|opening|vorspann|op|credits)\b',
+    caseSensitive: false,
+  );
+
   bool isNightMode = false;
   bool isVolumeBoostEnabled = false;
   VideoAspectMode aspectMode = VideoAspectMode.original;
@@ -53,6 +58,7 @@ class PlayerFeaturesDelegate {
   TimeDisplayMode timeDisplayMode = TimeDisplayMode.total;
   bool isMiniPlayer = false;
   Rect? _boundsBeforeMiniPlayer;
+  bool _wasMaximizedBeforeMiniPlayer = false;
 
   double get maxVolume =>
       isVolumeBoostEnabled ? AppSpacing.volumeBoostMax : AppSpacing.volumeMax;
@@ -77,6 +83,20 @@ class PlayerFeaturesDelegate {
         ? (_persistence.loadSeriesPreferences(entry.seriesId!)?.introSkipSeconds ??
             0)
         : 0;
+  }
+
+  void dismissIntroSkip() {
+    introSkipped = true;
+    _onChanged();
+  }
+
+  Future<void> resetForClose() async {
+    audioDelayMs = 0;
+    subtitleDelayMs = 0;
+    aspectMode = VideoAspectMode.original;
+    await _mpvBridge.setAudioDelay(0);
+    await _mpvBridge.setSubtitleDelay(0);
+    await _mpvBridge.setAspectMode(VideoAspectMode.original);
   }
 
   Future<void> loadChapters(bool Function() isDisposed) async {
@@ -185,8 +205,16 @@ class PlayerFeaturesDelegate {
   PlayerChapter? nextChapterInIntroWindow(Duration position) {
     final maxMs =
         AppSpacing.introSkipWindowSeconds * AppSpacing.millisecondsPerSecond;
-    for (final c in chapters) {
-      if (c.startMs > position.inMilliseconds && c.startMs <= maxMs) return c;
+    final posMs = position.inMilliseconds;
+    for (var i = 0; i < chapters.length - 1; i++) {
+      final current = chapters[i];
+      if (current.startMs <= maxMs &&
+          _introChapterPattern.hasMatch(current.title)) {
+        final next = chapters[i + 1];
+        if (next.startMs > posMs && next.startMs <= maxMs) {
+          return next;
+        }
+      }
     }
     return null;
   }
@@ -321,6 +349,10 @@ class PlayerFeaturesDelegate {
   }
 
   Future<void> enterMiniPlayer() async {
+    _wasMaximizedBeforeMiniPlayer = await _windowAdapter.isWindowMaximized();
+    if (_wasMaximizedBeforeMiniPlayer) {
+      await _windowAdapter.unmaximizeWindow();
+    }
     _boundsBeforeMiniPlayer = await _windowAdapter.getWindowBounds();
     await _windowAdapter.setWindowMinimumSize(
       const Size(AppSpacing.miniPlayerMinWidth, AppSpacing.miniPlayerMinHeight),
@@ -349,6 +381,10 @@ class PlayerFeaturesDelegate {
     if (_boundsBeforeMiniPlayer != null) {
       await _windowAdapter.setWindowBounds(_boundsBeforeMiniPlayer!);
       _boundsBeforeMiniPlayer = null;
+    }
+    if (_wasMaximizedBeforeMiniPlayer) {
+      _wasMaximizedBeforeMiniPlayer = false;
+      await _windowAdapter.maximizeWindow();
     }
     _onChanged();
   }

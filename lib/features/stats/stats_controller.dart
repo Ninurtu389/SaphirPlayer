@@ -121,7 +121,7 @@ class StatsController extends ChangeNotifier {
         COALESCE(SUM(wh.watched_ms), 0) AS total_ms,
         COUNT(*) AS play_count
       FROM watch_history wh
-      LEFT JOIN movies m ON wh.media_key = 'movie_' || m.id
+      LEFT JOIN movies m ON wh.media_key = COALESCE(m.sync_key, 'movie_' || m.id)
       WHERE wh.media_type = 'movie'
       GROUP BY wh.media_key, COALESCE(m.title, wh.title)
       HAVING total_ms > 0
@@ -144,13 +144,23 @@ class StatsController extends ChangeNotifier {
     final totalEpRow = db.select('SELECT COUNT(*) AS cnt FROM episodes;').first;
     final completedEpRow = db
         .select(
-          "SELECT COUNT(*) AS cnt FROM watch_progress WHERE media_type = 'episode' AND completed = 1;",
+          '''
+          SELECT COUNT(*) AS cnt
+          FROM watch_progress wp
+          INNER JOIN episodes e ON wp.media_key = COALESCE(e.sync_key, 'episode_' || e.id)
+          WHERE wp.media_type = 'episode' AND wp.completed = 1;
+          ''',
         )
         .first;
     final totalMovieRow = db.select('SELECT COUNT(*) AS cnt FROM movies;').first;
     final completedMovieRow = db
         .select(
-          "SELECT COUNT(*) AS cnt FROM watch_progress WHERE media_type = 'movie' AND completed = 1;",
+          '''
+          SELECT COUNT(*) AS cnt
+          FROM watch_progress wp
+          INNER JOIN movies m ON wp.media_key = COALESCE(m.sync_key, 'movie_' || m.id)
+          WHERE wp.media_type = 'movie' AND wp.completed = 1;
+          ''',
         )
         .first;
 

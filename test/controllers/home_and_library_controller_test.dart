@@ -42,8 +42,8 @@ void main() {
 
     expect(homeController.continueWatching.length, 2);
     expect(homeController.heroItem, isNotNull);
-    expect(homeController.recentlyAdded.length, 1);
-    expect(homeController.rediscoverItems.length, 1);
+    expect(homeController.recentlyAdded.length, 2);
+    expect(homeController.rediscoverItems.length, 2);
 
     homeController.updateSearchQuery('interstellar');
     expect(homeController.continueWatching.length, 1);

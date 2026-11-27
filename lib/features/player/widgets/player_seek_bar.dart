@@ -29,49 +29,55 @@ class _PlayerSeekBarState extends State<PlayerSeekBar> {
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
-    final durMs = controller.duration.inMilliseconds;
-    final posMs = controller.position.inMilliseconds;
-    final sliderValue = durMs > 0 ? (posMs / durMs).clamp(0.0, 1.0) : 0.0;
 
-    return Row(
-      children: [
-        Text(
-          Formatters.formatPlayerDuration(controller.position),
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-        const SizedBox(width: AppSpacing.sm),
-        Expanded(
-          child: SizedBox(
-            height: AppSpacing.seekBarHeight,
-            child: LayoutBuilder(
-              builder: (context, constraints) => _buildTrackArea(
-                context,
-                constraints.maxWidth,
-                sliderValue,
-                durMs,
+    return ValueListenableBuilder<({Duration position, Duration duration})>(
+      valueListenable: controller.progressListenable,
+      builder: (context, progress, _) {
+        final durMs = progress.duration.inMilliseconds;
+        final posMs = progress.position.inMilliseconds;
+        final sliderValue = durMs > 0 ? (posMs / durMs).clamp(0.0, 1.0) : 0.0;
+
+        return Row(
+          children: [
+            Text(
+              Formatters.formatPlayerDuration(progress.position),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: SizedBox(
+                height: AppSpacing.seekBarHeight,
+                child: LayoutBuilder(
+                  builder: (context, constraints) => _buildTrackArea(
+                    context,
+                    constraints.maxWidth,
+                    sliderValue,
+                    durMs,
+                  ),
+                ),
               ),
             ),
-          ),
-        ),
-        const SizedBox(width: AppSpacing.sm),
-        Tooltip(
-          message: AppStrings.playerTimeToggleTooltip,
-          child: InkWell(
-            onTap: controller.cycleTimeDisplayMode,
-            borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.xs,
-                vertical: AppSpacing.xxs,
-              ),
-              child: Text(
-                controller.formatRightTimeLabel(),
-                style: Theme.of(context).textTheme.bodySmall,
+            const SizedBox(width: AppSpacing.sm),
+            Tooltip(
+              message: AppStrings.playerTimeToggleTooltip,
+              child: InkWell(
+                onTap: controller.cycleTimeDisplayMode,
+                borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.xs,
+                    vertical: AppSpacing.xxs,
+                  ),
+                  child: Text(
+                    controller.formatRightTimeLabel(),
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
               ),
             ),
-          ),
-        ),
-      ],
+          ],
+        );
+      },
     );
   }
 
@@ -133,7 +139,8 @@ class _PlayerSeekBarState extends State<PlayerSeekBar> {
               onChanged: controller.seekToRatio,
             ),
           ),
-          if (showTooltip) _buildHoverTooltip(context, trackWidth, hoverRatio, durMs),
+          if (showTooltip)
+            _buildHoverTooltip(context, trackWidth, hoverRatio, durMs),
         ],
       ),
     );

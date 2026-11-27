@@ -129,5 +129,25 @@ void main() {
       expect(result.nasReachable, isTrue);
       expect(result.seriesCount, 1);
     });
+
+    test('groups flat episodes in root by series title and marks failed thumbnails',
+        () async {
+      final env = await TestEnv.create();
+      addTearDown(env.dispose);
+
+      final root = env.createSubdir('flat_root');
+      createCorruptVideoFile(root, 'Dark - S01E01 - Geheimnisse.mkv');
+      createCorruptVideoFile(root, 'Andor - S01E01 - Kassa.mkv');
+
+      final scanner = NasScannerService(env.dbService);
+      final result = await scanner.scanLibrary([root.path]);
+
+      expect(result.nasReachable, isTrue);
+      expect(result.seriesCount, 2);
+
+      final failedEps = env.dbService.instance
+          .select("SELECT thumb_status FROM episodes WHERE thumb_status = 'failed';");
+      expect(failedEps.length, 2);
+    });
   });
 }

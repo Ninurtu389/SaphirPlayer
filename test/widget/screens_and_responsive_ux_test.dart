@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:saphir_player/core/constants/app_colors.dart';
+import 'package:saphir_player/core/constants/app_spacing.dart';
 import 'package:saphir_player/core/constants/app_strings.dart';
 import 'package:saphir_player/core/controllers/library_controller.dart';
 import 'package:saphir_player/core/controllers/settings_controller.dart';
@@ -43,7 +44,7 @@ void main() {
     playerController = SaphirPlayerController(
       env.dbService,
       syncService,
-      () => settingsController.nasPath,
+      () => settingsController.nasPaths,
       player: harness.player,
       videoController: harness.videoController,
       onSetFullScreen: harness.onSetFullScreen,
@@ -195,6 +196,9 @@ void main() {
           (w) => w is TextField && w.decoration?.hintText == AppStrings.searchHint,
         ),
         'Interstellar',
+      );
+      await tester.pump(
+        const Duration(milliseconds: AppSpacing.searchDebounceMs + 20),
       );
       await tester.pumpAndSettle();
 

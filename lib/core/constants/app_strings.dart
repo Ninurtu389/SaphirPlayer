@@ -75,6 +75,7 @@ class AppStrings {
   static const String emptyHomeMessage =
       'Noch keine Einträge vorhanden. NAS-Pfad prüfen und scannen.';
   static const String seasonPrefix = 'Staffel';
+  static const String episodeFallbackPrefix = 'Folge';
   static const String watchedBadge = 'Gesehen';
   static const String remainingMinutesSuffix = 'Min. übrig';
   static const String backButton = 'Zurück';

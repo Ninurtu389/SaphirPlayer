@@ -8,6 +8,7 @@ abstract class IMpvPropertyBridge {
   Future<void> setProperty(String key, String value);
   Future<String?> getProperty(String key);
   Future<void> sendCommand(List<String> args);
+  Future<void> setHardwareDecoding(bool enabled);
   Future<void> setAudioNightMode(bool enabled);
   Future<void> setVolumeMax(double maxPercent);
   Future<void> setAudioDelay(double seconds);
@@ -74,8 +75,13 @@ class MpvPropertyBridge implements IMpvPropertyBridge {
   }
 
   @override
+  Future<void> setHardwareDecoding(bool enabled) async {
+    await setProperty('hwdec', enabled ? 'auto-safe' : 'no');
+  }
+
+  @override
   Future<void> setAudioNightMode(bool enabled) async {
-    await setProperty('af', enabled ? _nightModeFilter : '');
+    await sendCommand(['af', enabled ? 'add' : 'remove', _nightModeFilter]);
   }
 
   @override
@@ -127,10 +133,10 @@ class MpvPropertyBridge implements IMpvPropertyBridge {
     switch (mode) {
       case VideoAspectMode.original:
         await setProperty('panscan', '0');
-        await setProperty('video-aspect-override', '-1');
+        await setProperty('video-aspect-override', 'no');
       case VideoAspectMode.fillCrop:
         await setProperty('panscan', '1.0');
-        await setProperty('video-aspect-override', '-1');
+        await setProperty('video-aspect-override', 'no');
       case VideoAspectMode.ratio16x9:
         await setProperty('panscan', '0');
         await setProperty('video-aspect-override', '16:9');

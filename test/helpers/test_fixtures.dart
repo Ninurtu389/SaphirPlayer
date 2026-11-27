@@ -16,6 +16,7 @@ class TestEnv {
   static Future<TestEnv> create({bool inMemory = false}) async {
     final tempRoot = Directory.systemTemp.createTempSync('saphir_qa_test_');
     PortablePaths.testBaseDirectoryOverride = p.join(tempRoot.path, 'app_base');
+    await PortablePaths.warmUp();
     final dbService = DatabaseService();
     final dbPath = inMemory ? ':memory:' : p.join(tempRoot.path, 'test.db');
     await dbService.open(dbPath: dbPath);

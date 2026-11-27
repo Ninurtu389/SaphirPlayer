@@ -1,9 +1,9 @@
 import 'package:material_ui/material_ui.dart';
 import '../core/constants/app_colors.dart';
 import '../core/constants/app_spacing.dart';
-import '../core/constants/app_strings.dart';
 import '../core/services/local_file_service.dart';
 import '../core/theme/effect_mode.dart';
+import '../core/utils/formatters.dart';
 import '../features/library/library_models.dart';
 
 class MediaTile extends StatefulWidget {
@@ -173,7 +173,7 @@ class _TileContent extends StatelessWidget {
                 borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
               ),
               child: Text(
-                '${item.remainingMinutes} ${AppStrings.remainingMinutesSuffix}',
+                Formatters.formatRemainingMinutes(item.remainingMinutes),
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ),

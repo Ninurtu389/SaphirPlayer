@@ -88,6 +88,9 @@ class FakePlayerHarness {
   final List<Rect> windowBoundsHistory = [];
   final List<Size> windowMinSizeHistory = [];
   Rect currentWindowBounds = const Rect.fromLTWH(100, 100, 1280, 800);
+  bool isWindowMaximizedState = false;
+  int maximizeCount = 0;
+  int unmaximizeCount = 0;
   String? pickedSubtitlePath;
   int dragCount = 0;
 
@@ -100,6 +103,15 @@ class FakePlayerHarness {
           windowBoundsHistory.add(rect);
         },
         setWindowMinimumSize: (size) async => windowMinSizeHistory.add(size),
+        isWindowMaximized: () async => isWindowMaximizedState,
+        unmaximizeWindow: () async {
+          isWindowMaximizedState = false;
+          unmaximizeCount++;
+        },
+        maximizeWindow: () async {
+          isWindowMaximizedState = true;
+          maximizeCount++;
+        },
         pickSubtitleFile: (_) async => pickedSubtitlePath,
         startWindowDragging: () async => dragCount++,
       );

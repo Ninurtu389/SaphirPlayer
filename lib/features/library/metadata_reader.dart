@@ -33,9 +33,9 @@ class MetadataReader {
           caseSensitive: false,
         ).firstMatch(content);
         if (match != null) {
-          final cleaned =
-              match.group(1)?.replaceAll(RegExp(r'\s+'), ' ').trim();
-          if (cleaned != null && cleaned.isNotEmpty) {
+          final rawPlot = match.group(1) ?? '';
+          final cleaned = _decodeNfoText(rawPlot);
+          if (cleaned.isNotEmpty) {
             return cleaned;
           }
         }
@@ -45,5 +45,28 @@ class MetadataReader {
     }
 
     return null;
+  }
+
+  static String _decodeNfoText(String raw) {
+    var text = raw.replaceAllMapped(
+      RegExp(r'<!\[CDATA\[(.*?)\]\]>', dotAll: true),
+      (m) => m.group(1) ?? '',
+    );
+    text = text
+        .replaceAll('&quot;', '"')
+        .replaceAll('&#39;', "'")
+        .replaceAll('&apos;', "'")
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAllMapped(RegExp(r'&#(\d+);'), (m) {
+          final code = int.tryParse(m.group(1) ?? '');
+          return code != null ? String.fromCharCode(code) : m.group(0)!;
+        })
+        .replaceAllMapped(RegExp(r'&#x([0-9A-Fa-f]+);'), (m) {
+          final code = int.tryParse(m.group(1) ?? '', radix: 16);
+          return code != null ? String.fromCharCode(code) : m.group(0)!;
+        })
+        .replaceAll('&amp;', '&');
+    return text.replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 }

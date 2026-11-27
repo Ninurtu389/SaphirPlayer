@@ -7,6 +7,7 @@ import 'package:saphir_player/core/constants/app_strings.dart';
 import 'package:saphir_player/core/controllers/library_controller.dart';
 import 'package:saphir_player/core/controllers/settings_controller.dart';
 import 'package:saphir_player/core/storage/progress_sync_service.dart';
+import 'package:saphir_player/core/storage/sync_key_utils.dart';
 import 'package:saphir_player/core/theme/app_theme.dart';
 import 'package:saphir_player/features/home/home_controller.dart';
 import 'package:saphir_player/features/player/player_models.dart';
@@ -57,7 +58,7 @@ void main() {
     playerController = SaphirPlayerController(
       env.dbService,
       syncService,
-      () => settingsController.nasPath,
+      () => settingsController.nasPaths,
       settingsController: settingsController,
       player: harness.player,
       videoController: harness.videoController,
@@ -169,7 +170,17 @@ void main() {
       () => Future<void>.delayed(const Duration(milliseconds: 40)),
     );
     await tester.pump();
-    expect(playerController.currentEntry?.mediaKey, 'episode_2');
+    final expectedEp2Key = SyncKeyUtils.buildStableSyncKey(
+      'ep',
+      p.join(
+        nasRoot.path,
+        'Andor',
+        'Season 1',
+        'Andor - S01E02 - That Would Be Me.mp4',
+      ),
+      nasRoot.path,
+    );
+    expect(playerController.currentEntry?.mediaKey, expectedEp2Key);
 
     playerController.setSleepTimer(SleepTimerOption.endOfEpisode);
     await tester.tap(find.byTooltip(AppStrings.playerMiniPlayerTooltip));

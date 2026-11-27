@@ -45,6 +45,12 @@ void main() {
           'idx_watch_history_day',
           'idx_watch_history_media',
           'idx_media_bookmarks_key',
+          'idx_episodes_sync_key',
+          'idx_movies_sync_key',
+          'idx_episodes_series_id',
+          'idx_episodes_season_id',
+          'idx_seasons_series_id',
+          'idx_watch_progress_completed_updated',
         ]),
       );
 
@@ -52,7 +58,7 @@ void main() {
       expect(fk, 1);
 
       final version = db.select('PRAGMA user_version;').first.values.first;
-      expect(version, 2);
+      expect(version, 3);
     });
 
     test('throws StateError when accessed before open()', () {
@@ -268,7 +274,8 @@ void main() {
       );
 
       final sync = ProgressSyncService(env.dbService);
-      await sync.syncWithRoots([p.join(env.tempRoot.path, 'offline_nas')]);
+      final syncResult = await sync.syncWithRoots([p.join(env.tempRoot.path, 'offline_nas')]);
+      expect(syncResult.syncedToNas, isFalse);
 
       final localSync = File(
         p.join(env.tempRoot.path, 'app_base', 'data', 'progress_sync.json'),

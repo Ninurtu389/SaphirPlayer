@@ -26,7 +26,7 @@ void main() {
     controller = SaphirPlayerController(
       env.dbService,
       syncService,
-      () => mediaDir.path,
+      () => [mediaDir.path],
       player: harness.player,
       videoController: harness.videoController,
       onSetFullScreen: harness.onSetFullScreen,
@@ -54,6 +54,9 @@ void main() {
         () async {
       final ep1 = createSyntheticMp4HeaderFile(mediaDir, 'ep1.mp4');
       final ep2 = createSyntheticMp4HeaderFile(mediaDir, 'ep2.mp4');
+      env.dbService.instance.execute(
+        "UPDATE watch_progress SET position_ms = 45000 WHERE media_key = 'episode_1';",
+      );
 
       await controller.startSession(
         PlaybackSession(
@@ -82,11 +85,18 @@ void main() {
       );
 
       expect(harness.openedMedia.length, 1);
-      expect(harness.seekTargets.first, const Duration(milliseconds: 45000));
+      expect(
+        harness.openedMedia.first.start,
+        const Duration(milliseconds: 45000),
+      );
+      expect(harness.seekTargets, isEmpty);
       expect(controller.hasNextEpisode, isTrue);
       expect(controller.hasPreviousEpisode, isFalse);
 
       harness.emitDuration(const Duration(minutes: 45));
+      await Future<void>.delayed(Duration.zero);
+      expect(harness.seekTargets.first, const Duration(milliseconds: 45000));
+
       harness.emitPosition(const Duration(minutes: 10));
       await Future<void>.delayed(Duration.zero);
 
@@ -127,6 +137,9 @@ void main() {
         () async {
       final ep1 = createSyntheticMp4HeaderFile(mediaDir, 'ep1.mp4');
       final ep2 = createSyntheticMp4HeaderFile(mediaDir, 'ep2.mp4');
+      env.dbService.instance.execute(
+        "UPDATE watch_progress SET position_ms = 0 WHERE media_key = 'episode_1';",
+      );
 
       await controller.startSession(
         PlaybackSession(
@@ -163,7 +176,7 @@ void main() {
       expect(controller.showAutoNextCard, isTrue);
       expect(controller.autoNextRemainingSeconds, 10);
 
-      // Completed triggers auto-next
+      // Completed triggers auto-next without overwriting completed = 1
       harness.emitCompleted(true);
       for (var i = 0;
           i < 10 && controller.currentEntry?.mediaKey != 'episode_2';
@@ -171,6 +184,10 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 20));
       }
       expect(controller.currentEntry?.mediaKey, 'episode_2');
+      final ep1Prog = env.dbService.instance
+          .select("SELECT completed FROM watch_progress WHERE media_key = 'episode_1';")
+          .first;
+      expect(ep1Prog['completed'], 1);
 
       // Dismiss prevents auto-next on completion
       await controller.playPreviousEpisode();
@@ -243,8 +260,8 @@ void main() {
       final audioDe = AudioTrack('deu', 'Deutsch', 'de');
       final subOff = SubtitleTrack.no();
 
-      harness.emitTrack(Track(audio: audioDe, subtitle: subOff));
-      await Future<void>.delayed(Duration.zero);
+      await controller.selectAudioTrack(audioDe);
+      await controller.selectSubtitleTrack(subOff);
 
       // Verify saved in DB
       final prefRow = env.dbService.instance
@@ -385,7 +402,7 @@ void main() {
       final localController = SaphirPlayerController(
         env.dbService,
         syncService,
-        () => mediaDir.path,
+        () => [mediaDir.path],
         player: localHarness.player,
         videoController: localHarness.videoController,
         onSetFullScreen: localHarness.onSetFullScreen,

@@ -24,13 +24,9 @@ class ScanResult {
 }
 
 class _ScanPayload {
-  const _ScanPayload({
-    required this.rootPaths,
-    required this.thumbCacheDir,
-  });
+  const _ScanPayload({required this.rootPaths});
 
   final List<String> rootPaths;
-  final String thumbCacheDir;
 }
 
 class NasScannerService {
@@ -77,15 +73,19 @@ class NasScannerService {
       );
     }
 
-    final thumbDir = await PortablePaths.getCacheDirectory();
     final output = await Isolate.run(
-      () => _runScanInIsolate(
-        _ScanPayload(
-          rootPaths: cleanedPaths,
-          thumbCacheDir: thumbDir,
-        ),
-      ),
+      () => _runScanInIsolate(_ScanPayload(rootPaths: cleanedPaths)),
     );
+
+    if (_isPlaybackActive) {
+      final counts = _repository.currentCounts();
+      return ScanResult(
+        nasReachable: output.nasReachable,
+        seriesCount: counts.$1,
+        movieCount: counts.$2,
+        skippedDueToPlayback: true,
+      );
+    }
 
     if (!output.nasReachable) {
       final counts = _repository.currentCounts();
@@ -97,7 +97,8 @@ class NasScannerService {
       );
     }
 
-    _repository.applyDiff(output);
+    final orphanedThumbs = _repository.applyDiff(output);
+    await _deleteOrphanedThumbnails(orphanedThumbs);
     await _generateMissingThumbnails();
     final counts = _repository.currentCounts();
 
@@ -107,6 +108,23 @@ class NasScannerService {
       movieCount: counts.$2,
       skippedDueToPlayback: _isPlaybackActive,
     );
+  }
+
+  Future<void> _deleteOrphanedThumbnails(List<String> orphanedThumbs) async {
+    for (final stored in orphanedThumbs) {
+      final resolved = PortablePaths.resolveThumbnailPath(stored);
+      if (resolved == null || resolved.isEmpty) {
+        continue;
+      }
+      try {
+        final thumbFile = File(resolved);
+        if (await thumbFile.exists()) {
+          await thumbFile.delete();
+        }
+      } on FileSystemException {
+        // Gesperrte Cache-Datei ignorieren
+      }
+    }
   }
 
   Future<void> _generateMissingThumbnails() async {
@@ -119,7 +137,7 @@ class NasScannerService {
       '''
       SELECT id, file_path, duration_ms
       FROM episodes
-      WHERE thumb_path IS NULL OR thumb_path = ''
+      WHERE thumb_status = 'pending' AND (thumb_path IS NULL OR thumb_path = '')
       LIMIT ?;
       ''',
       [AppSpacing.maxThumbnailsPerScan],
@@ -131,7 +149,7 @@ class NasScannerService {
             '''
             SELECT id, file_path, duration_ms
             FROM movies
-            WHERE thumb_path IS NULL OR thumb_path = ''
+            WHERE thumb_status = 'pending' AND (thumb_path IS NULL OR thumb_path = '')
             LIMIT ?;
             ''',
             [remainingQuota],
@@ -142,55 +160,95 @@ class NasScannerService {
       return;
     }
 
-    final mediaKitSession = await ThumbnailMediaKitSession.create();
+    ThumbnailMediaKitSession? mediaKitSession;
+    var mediaKitAttempted = false;
+
+    Future<ThumbnailGenerationResult?> generateWithLazyFallback({
+      required String filePath,
+      required int durationMs,
+      required String prefix,
+    }) async {
+      final result = await ThumbnailGeneratorService.generateThumbnail(
+        videoFilePath: filePath,
+        durationMs: durationMs,
+        isPlaybackActive: () => _isPlaybackActive,
+        prefix: prefix,
+        mediaKitSession: mediaKitSession,
+        allowMediaKitFallback: mediaKitSession != null,
+      );
+      if (result != null || _isPlaybackActive || mediaKitAttempted) {
+        return result;
+      }
+      mediaKitAttempted = true;
+      mediaKitSession = await ThumbnailMediaKitSession.create();
+      if (mediaKitSession == null || _isPlaybackActive) {
+        return null;
+      }
+      return ThumbnailGeneratorService.generateThumbnail(
+        videoFilePath: filePath,
+        durationMs: durationMs,
+        isPlaybackActive: () => _isPlaybackActive,
+        prefix: prefix,
+        mediaKitSession: mediaKitSession,
+        allowMediaKitFallback: true,
+      );
+    }
 
     try {
       for (final row in episodeRows) {
-        if (_isPlaybackActive) {
-          break;
-        }
+        if (_isPlaybackActive) break;
         final id = row['id'] as int;
         final filePath = row['file_path'] as String;
         final durationMs = row['duration_ms'] as int;
 
-        final thumbPath =
-            await ThumbnailGeneratorService.generateEpisodeThumbnail(
-          videoFilePath: filePath,
+        final result = await generateWithLazyFallback(
+          filePath: filePath,
           durationMs: durationMs,
-          isPlaybackActive: _isPlaybackActive,
-          mediaKitSession: mediaKitSession,
-          allowMediaKitFallback: mediaKitSession != null,
+          prefix: 'ep',
         );
+        if (_isPlaybackActive) break;
 
-        if (thumbPath != null && !_isPlaybackActive) {
+        if (result?.fileName != null) {
+          final nextDur = (durationMs == 0 && (result!.durationMs ?? 0) > 0)
+              ? result.durationMs!
+              : durationMs;
           db.execute(
-            'UPDATE episodes SET thumb_path = ? WHERE id = ?;',
-            [thumbPath, id],
+            "UPDATE episodes SET thumb_path = ?, thumb_status = 'ready', duration_ms = ? WHERE id = ?;",
+            [result!.fileName, nextDur, id],
+          );
+        } else {
+          db.execute(
+            "UPDATE episodes SET thumb_status = 'failed' WHERE id = ?;",
+            [id],
           );
         }
       }
 
       for (final row in movieRows) {
-        if (_isPlaybackActive) {
-          break;
-        }
+        if (_isPlaybackActive) break;
         final id = row['id'] as int;
         final filePath = row['file_path'] as String;
         final durationMs = row['duration_ms'] as int;
 
-        final thumbPath = await ThumbnailGeneratorService.generateThumbnail(
-          videoFilePath: filePath,
+        final result = await generateWithLazyFallback(
+          filePath: filePath,
           durationMs: durationMs,
-          isPlaybackActive: _isPlaybackActive,
           prefix: 'mv',
-          mediaKitSession: mediaKitSession,
-          allowMediaKitFallback: mediaKitSession != null,
         );
+        if (_isPlaybackActive) break;
 
-        if (thumbPath != null && !_isPlaybackActive) {
+        if (result?.fileName != null) {
+          final nextDur = (durationMs == 0 && (result!.durationMs ?? 0) > 0)
+              ? result.durationMs!
+              : durationMs;
           db.execute(
-            'UPDATE movies SET thumb_path = ? WHERE id = ?;',
-            [thumbPath, id],
+            "UPDATE movies SET thumb_path = ?, thumb_status = 'ready', duration_ms = ? WHERE id = ?;",
+            [result!.fileName, nextDur, id],
+          );
+        } else {
+          db.execute(
+            "UPDATE movies SET thumb_status = 'failed' WHERE id = ?;",
+            [id],
           );
         }
       }
@@ -205,7 +263,7 @@ class NasScannerService {
     final posterBySeries = <String, String>{};
     final folderBySeries = <String, String>{};
     final summaryBySeries = <String, String?>{};
-    final movies = <ParsedMovie>[];
+    final movies = <ScannedMovieData>[];
 
     for (final rootPath in payload.rootPaths) {
       final rootDir = Directory(rootPath);
@@ -228,23 +286,42 @@ class NasScannerService {
 
         final episode = MediaParser.parseEpisode(filePath, rootPath);
         if (episode != null) {
-          final seriesFolder = _resolveSeriesRoot(filePath, rootPath);
-          final key = seriesFolder.toLowerCase();
+          final resolved = _resolveSeriesRoot(
+            filePath,
+            rootPath,
+            episode.seriesTitle,
+          );
+          final key = resolved.groupKey;
           episodesBySeries.putIfAbsent(key, () => []).add(episode);
-          folderBySeries.putIfAbsent(key, () => seriesFolder);
+          folderBySeries.putIfAbsent(key, () => resolved.folderPath);
           posterBySeries.putIfAbsent(
             key,
             () =>
-                NasScanRepository.findLocalPosterInDir(seriesFolder) ??
+                (resolved.metaDir != null
+                    ? NasScanRepository.findLocalPosterInDir(resolved.metaDir!)
+                    : null) ??
                 NasScanRepository.findLocalPosterNearFile(filePath) ??
                 '',
           );
           summaryBySeries.putIfAbsent(
             key,
-            () => MetadataReader.readSeriesSummary(seriesFolder),
+            () => resolved.metaDir != null
+                ? MetadataReader.readSeriesSummary(resolved.metaDir!)
+                : null,
           );
         } else {
-          movies.add(MediaParser.parseMovie(filePath, rootPath));
+          final parsed = MediaParser.parseMovie(filePath, rootPath);
+          final posterPath =
+              NasScanRepository.findLocalPosterNearFile(filePath);
+          movies.add(
+            ScannedMovieData(
+              title: parsed.title,
+              releaseYear: parsed.releaseYear,
+              filePath: parsed.filePath,
+              posterPath: posterPath,
+              syncKey: parsed.syncKey,
+            ),
+          );
         }
       }
     }
@@ -312,14 +389,29 @@ class NasScannerService {
     return files;
   }
 
-  static String _resolveSeriesRoot(String episodeFilePath, String rootPath) {
+  static ({String groupKey, String folderPath, String? metaDir})
+      _resolveSeriesRoot(
+    String episodeFilePath,
+    String rootPath,
+    String seriesTitle,
+  ) {
     final rel = p.relative(episodeFilePath, from: rootPath);
     final parts = p.split(rel);
     for (var i = parts.length - 2; i >= 0; i--) {
       if (!MediaParser.isNonSeriesSubfolder(parts[i])) {
-        return p.joinAll([rootPath, ...parts.take(i + 1)]);
+        final seriesFolder = p.joinAll([rootPath, ...parts.take(i + 1)]);
+        return (
+          groupKey: seriesFolder.toLowerCase(),
+          folderPath: seriesFolder,
+          metaDir: seriesFolder,
+        );
       }
     }
-    return p.dirname(episodeFilePath);
+    final normalizedTitle = seriesTitle.trim().toLowerCase();
+    return (
+      groupKey: '$rootPath::$normalizedTitle'.toLowerCase(),
+      folderPath: '$rootPath::$normalizedTitle',
+      metaDir: null,
+    );
   }
 }

@@ -2,11 +2,60 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:saphir_player/core/constants/app_strings.dart';
 import 'package:saphir_player/core/utils/formatters.dart';
+import 'package:saphir_player/features/library/library_models.dart';
 import 'package:saphir_player/features/player/mpv_property_bridge.dart';
 import 'package:saphir_player/features/player/track_preference_resolver.dart';
 
 void main() {
-  group('Formatters remaining & finish time', () {
+  group('Formatters remaining, finish time, playbackSpeed & UI helpers', () {
+    test('formatPlaybackSpeed formats all speeds accurately without rounding', () {
+      expect(Formatters.formatPlaybackSpeed(0.75), '0.75×');
+      expect(Formatters.formatPlaybackSpeed(1.0), '1.0×');
+      expect(Formatters.formatPlaybackSpeed(1.25), '1.25×');
+      expect(Formatters.formatPlaybackSpeed(1.5), '1.5×');
+      expect(Formatters.formatPlaybackSpeed(2.0), '2.0×');
+    });
+
+    test('UI string formatters format remaining, episode row, series progress and hero line',
+        () {
+      expect(
+        Formatters.formatRemainingMinutes(12),
+        '12 ${AppStrings.remainingMinutesSuffix}',
+      );
+      expect(Formatters.formatEpisodeRowTitle(3, 'Kassa'), '3. Kassa');
+      expect(
+        Formatters.formatSeriesWatchedProgress(2, 8),
+        '2 / 8 ${AppStrings.episodesCountLabel} ${AppStrings.watchedBadge.toLowerCase()}',
+      );
+      expect(
+        Formatters.formatHeroInfoLine('S1E2 · Lüge', 20),
+        'S1E2 · Lüge · 20 ${AppStrings.remainingMinutesSuffix}',
+      );
+      expect(Formatters.formatHeroInfoLine('Film · 2024', 0), 'Film · 2024');
+
+      expect(
+        Formatters.formatSeriesPlayButton(null),
+        AppStrings.playEpisodeOneButton,
+      );
+      expect(
+        Formatters.formatSeriesPlayButton(
+          const EpisodeEntry(
+            id: 1,
+            seriesId: 1,
+            seasonId: 1,
+            seasonNumber: 2,
+            episodeNumber: 5,
+            title: 'Test',
+            filePath: 'a.mkv',
+            durationMs: 1000,
+            thumbPath: null,
+            positionMs: 500,
+            isCompleted: false,
+          ),
+        ),
+        '${AppStrings.resumeButton} (S02E05)',
+      );
+    });
     test('formatRemainingDuration formats negative remaining time', () {
       expect(
         Formatters.formatRemainingDuration(

@@ -30,7 +30,7 @@ void main() {
     controller = SaphirPlayerController(
       env.dbService,
       syncService,
-      () => mediaDir.path,
+      () => [mediaDir.path],
       player: harness.player,
       videoController: harness.videoController,
       onSetFullScreen: harness.onSetFullScreen,
@@ -176,6 +176,9 @@ void main() {
 
     final ep1 = createSyntheticHevcStubFile(mediaDir, 'hevc.mp4');
     final ep2 = createSyntheticMp4HeaderFile(mediaDir, 'ep2.mp4');
+    env.dbService.instance.execute(
+      "UPDATE watch_progress SET position_ms = 0 WHERE media_key = 'episode_1';",
+    );
 
     await tester.runAsync(
       () => controller.startSession(

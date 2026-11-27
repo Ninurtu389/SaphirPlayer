@@ -5,6 +5,7 @@ import 'package:saphir_player/core/controllers/settings_controller.dart';
 import 'package:saphir_player/core/theme/effect_mode.dart';
 import 'package:saphir_player/features/home/home_controller.dart';
 import 'package:saphir_player/features/library/library_models.dart';
+import 'package:saphir_player/features/library/media_repository.dart';
 import 'package:saphir_player/features/player/playback_session.dart';
 import 'package:saphir_player/features/shell/shell_controller.dart';
 import 'package:saphir_player/features/stats/stats_controller.dart';
@@ -69,22 +70,49 @@ void main() {
       seedSampleLibrary(env.dbService);
       homeController.refreshHomeFeeds();
 
-      // Dark was watched 90 days ago, Andor has NULL last_watched_at -> both stale
-      expect(homeController.rediscoverItems.length, 2);
+      // Dark was watched 90 days ago, Andor + 2 movies have NULL last_watched_at -> 4 stale
+      expect(homeController.rediscoverItems.length, 4);
 
-      // Update Dark to watched today -> no longer stale
+      // Update Dark to watched today -> no longer stale (Andor + 2 movies remain)
       env.dbService.instance.execute(
         'UPDATE series SET last_watched_at = ? WHERE id = 1;',
         [DateTime.now().millisecondsSinceEpoch],
       );
       homeController.refreshHomeFeeds();
-      expect(homeController.rediscoverItems.length, 1);
-      expect(homeController.rediscoverItems.first.title, 'Andor');
+      expect(homeController.rediscoverItems.length, 3);
+      expect(
+        homeController.rediscoverItems.map((e) => e.title),
+        containsAll(['Andor', 'Interstellar', 'Arrival']),
+      );
 
       homeController.updateSearchQuery('  dark ');
+      expect(homeController.heroItem, isNull);
       expect(homeController.seriesItems.length, 1);
       expect(homeController.seriesItems.first.title, 'Dark');
       expect(homeController.movieItems, isEmpty);
+    });
+
+    test('pickRandomItem includes movies and buildSessionForCard uses nextResumeEpisode for series',
+        () {
+      seedSampleLibrary(env.dbService);
+      // Mark episode 1 of Dark as completed so nextResumeEpisode is episode 2
+      env.dbService.instance.execute(
+        "UPDATE watch_progress SET completed = 1, position_ms = 0 WHERE media_key = 'episode_1';",
+      );
+      homeController.refreshHomeFeeds();
+
+      final seriesCard =
+          homeController.seriesItems.firstWhere((e) => e.title == 'Dark');
+      final session = homeController.buildSessionForCard(seriesCard);
+      expect(session.initialIndex, 1);
+      expect(session.queue[session.initialIndex].mediaKey, 'episode_2');
+
+      // With only movies in DB, pickRandomItem still returns a movie
+      env.dbService.instance.execute('DELETE FROM series;');
+      homeController.refreshHomeFeeds();
+      final randomMovie = homeController.pickRandomItem();
+      expect(randomMovie, isNotNull);
+      expect(randomMovie!.mediaType, 'movie');
     });
 
     test('pickRandomItem returns null when empty and an item when seeded', () {
@@ -172,13 +200,88 @@ void main() {
       ctrl.dispose();
     });
 
-    test('updateNasPath replaces primary path or clears when empty', () {
-      settingsController.updateNasPath(r'D:\Media');
+    test('addNasPath/removeNasPath and immediate EffectMode persistence work without save()',
+        () async {
+      expect(settingsController.addNasPath(r'D:\Media'), isTrue);
       expect(settingsController.nasPaths, [r'D:\Media']);
-      settingsController.updateNasPath(r'E:\Media');
-      expect(settingsController.nasPaths, [r'E:\Media']);
-      settingsController.updateNasPath('   ');
+      expect(settingsController.addNasPath(r'D:\media'), isFalse);
+      settingsController.removeNasPath(r'D:\Media');
       expect(settingsController.nasPaths, isEmpty);
+
+      settingsController.updateEffectMode(EffectMode.lean);
+      settingsController.updatePerDeviceEffect(false);
+      final reloaded = SettingsController(env.dbService);
+      await reloaded.load();
+      expect(reloaded.effectMode, EffectMode.lean);
+      expect(reloaded.perDeviceEffect, isFalse);
+      reloaded.dispose();
+    });
+  });
+
+  group('MediaRepository & ShellController orchestration', () {
+    test('MediaRepository loads single-join detail and removes from continueWatching without deleting history',
+        () {
+      seedSampleLibrary(env.dbService);
+      final repo = MediaRepository(env.dbService);
+      final detail = repo.loadSeriesDetail(1)!;
+      expect(detail.seasons.length, 2);
+      expect(detail.totalEpisodes, 3);
+
+      env.dbService.instance.execute(
+        '''
+        INSERT INTO watch_history (
+          media_key, media_type, title, series_id, watched_ms, started_at, ended_at, day_key, weekday, source_device
+        ) VALUES ('episode_1', 'episode', 'Dark', 1, 1200000, 1000, 1201000, '2026-11-27', 5, 'PC');
+        ''',
+      );
+
+      homeController.refreshHomeFeeds();
+      final epCard = homeController.continueWatching
+          .firstWhere((c) => c.mediaKey == 'episode_1');
+      homeController.removeFromContinueWatching(epCard, deviceName: 'TestPC');
+
+      expect(
+        homeController.continueWatching.any((c) => c.mediaKey == 'episode_1'),
+        isFalse,
+      );
+      final histCount = env.dbService.instance
+          .select('SELECT COUNT(*) AS c FROM watch_history;')
+          .first['c'];
+      expect(histCount, 1);
+    });
+
+    test('ShellController debounces search, manages statusMessage, and syncs window maximize callbacks',
+        () async {
+      final shell = ShellController(
+        settingsController: settingsController,
+        libraryController: libraryController,
+        homeController: homeController,
+        statsController: statsController,
+        databaseService: env.dbService,
+      );
+      seedSampleLibrary(env.dbService);
+      libraryController.loadCountsFromCache();
+      homeController.refreshHomeFeeds();
+
+      shell.onWindowMaximize();
+      expect(shell.isMaximized, isTrue);
+      shell.onWindowUnmaximize();
+      expect(shell.isMaximized, isFalse);
+
+      shell.selectSection(AppSection.settings);
+      shell.updateGlobalSearch('Interstellar');
+      expect(shell.activeSection, AppSection.settings);
+      await Future<void>.delayed(
+        const Duration(milliseconds: AppSpacing.searchDebounceMs + 40),
+      );
+      expect(shell.activeSection, AppSection.library);
+      expect(libraryController.filteredItems.length, 1);
+
+      shell.handleSaveSettings(r'D:\SavedMedia');
+      expect(shell.statusMessage, isNotEmpty);
+      expect(settingsController.nasPaths, [r'D:\SavedMedia']);
+
+      shell.dispose();
     });
   });
 

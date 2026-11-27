@@ -1,3 +1,5 @@
+import '../../core/utils/formatters.dart';
+
 enum LibraryFilter {
   all,
   series,
@@ -70,6 +72,7 @@ class EpisodeEntry {
     required this.thumbPath,
     required this.positionMs,
     required this.isCompleted,
+    this.syncKey,
   });
 
   final int id;
@@ -83,6 +86,12 @@ class EpisodeEntry {
   final String? thumbPath;
   final int positionMs;
   final bool isCompleted;
+  final String? syncKey;
+
+  String get mediaKey =>
+      (syncKey != null && syncKey!.isNotEmpty)
+          ? syncKey!
+          : Formatters.episodeMediaKey(id);
 
   double get progressRatio {
     if (isCompleted) {

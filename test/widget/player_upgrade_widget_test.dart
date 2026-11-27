@@ -40,7 +40,7 @@ void main() {
     controller = SaphirPlayerController(
       env.dbService,
       syncService,
-      () => mediaDir.path,
+      () => [mediaDir.path],
       settingsController: settingsController,
       player: harness.player,
       videoController: harness.videoController,

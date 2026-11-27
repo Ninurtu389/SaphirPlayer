@@ -21,7 +21,7 @@ class SaphirPlayerController extends ChangeNotifier {
   SaphirPlayerController(
     DatabaseService databaseService,
     this._syncService,
-    this._getNasPath, {
+    this._getNasPaths, {
     SettingsController? settingsController,
     Player? player,
     VideoController? videoController,
@@ -31,16 +31,13 @@ class SaphirPlayerController extends ChangeNotifier {
     Future<String?> Function(Uint8List bytes, String title)? onSaveScreenshot,
   })  : _persistence = PlaybackPersistenceService(databaseService),
         _settingsController = settingsController,
-        _windowAdapter =
-            windowAdapter ?? PlayerWindowAdapter(setFullScreen: onSetFullScreen) {
-    _player = player ??
-        Player(configuration: const PlayerConfiguration(title: AppStrings.appTitle));
+        _windowAdapter = windowAdapter ?? PlayerWindowAdapter(setFullScreen: onSetFullScreen) {
+    _player = player ?? Player(configuration: const PlayerConfiguration(title: AppStrings.appTitle));
     _videoController = videoController ??
         VideoController(
           _player,
           configuration: VideoControllerConfiguration(
-            enableHardwareAcceleration:
-                settingsController?.hardwareAccelerationEnabled ?? true,
+            enableHardwareAcceleration: settingsController?.hardwareAccelerationEnabled ?? true,
           ),
         );
     _mpvBridge = mpvBridge ?? MpvPropertyBridge(_player);
@@ -52,9 +49,7 @@ class SaphirPlayerController extends ChangeNotifier {
       windowAdapter: _windowAdapter,
       overlays: _overlays,
       settingsController: _settingsController,
-      onSaveScreenshot: onSaveScreenshot ??
-          (bytes, title) =>
-              LocalFileService.saveScreenshotBytes(bytes: bytes, title: title),
+      onSaveScreenshot: onSaveScreenshot ?? (bytes, title) => LocalFileService.saveScreenshotBytes(bytes: bytes, title: title),
       onChanged: _safeNotify,
     );
     _bindStreams();
@@ -62,7 +57,7 @@ class SaphirPlayerController extends ChangeNotifier {
 
   final PlaybackPersistenceService _persistence;
   final ProgressSyncService _syncService;
-  final String Function() _getNasPath;
+  final List<String> Function() _getNasPaths;
   final SettingsController? _settingsController;
   final PlayerWindowAdapter _windowAdapter;
   late final Player _player;
@@ -74,8 +69,14 @@ class SaphirPlayerController extends ChangeNotifier {
   Timer? _hudHideTimer;
   Timer? _progressTimer;
   bool _isDisposed = false;
+  bool _isMenuOrDialogOpen = false;
   int _openRequestId = 0;
   int? _pendingStartPositionMs;
+  int _lastProgressNotifyMs = 0;
+  int _lastNotifiedPositionSecond = -1;
+
+  final ValueNotifier<({Duration position, Duration duration})> progressListenable =
+      ValueNotifier((position: Duration.zero, duration: Duration.zero));
 
   PlaybackSession? _session;
   int _currentIndex = 0;
@@ -92,20 +93,15 @@ class SaphirPlayerController extends ChangeNotifier {
   List<SubtitleTrack> _subtitleTracks = const [];
   AudioTrack _activeAudioTrack = AudioTrack.auto();
   SubtitleTrack _activeSubtitleTrack = SubtitleTrack.auto();
-  String? _autoAppliedSubtitleId;
   String? _errorMessage;
 
   VideoController get videoController => _videoController;
   PlaybackSession? get session => _session;
-  PlaybackQueueEntry? get currentEntry => (_session == null || _session!.queue.isEmpty)
-      ? null
-      : _session!.queue[_currentIndex.clamp(0, _session!.queue.length - 1)];
-  PlaybackQueueEntry? get nextEntry =>
-      hasNextEpisode ? _session!.queue[_currentIndex + 1] : null;
+  PlaybackQueueEntry? get currentEntry => (_session == null || _session!.queue.isEmpty) ? null : _session!.queue[_currentIndex.clamp(0, _session!.queue.length - 1)];
+  PlaybackQueueEntry? get nextEntry => hasNextEpisode ? _session!.queue[_currentIndex + 1] : null;
   int get currentIndex => _currentIndex;
   bool get hasPreviousEpisode => _currentIndex > 0;
-  bool get hasNextEpisode =>
-      _session != null && _currentIndex + 1 < _session!.queue.length;
+  bool get hasNextEpisode => _session != null && _currentIndex + 1 < _session!.queue.length;
   bool get isPlaying => _isPlaying;
   bool get isFullscreen => _isFullscreen;
   bool get isMiniPlayer => _features.isMiniPlayer;
@@ -144,39 +140,47 @@ class SaphirPlayerController extends ChangeNotifier {
   Duration? get sleepTimerRemaining => _overlays.sleepTimerRemaining;
 
   int get autoNextRemainingSeconds {
-    if (!hasNextEpisode ||
-        _autoNextDismissed ||
-        sleepTimerOption == SleepTimerOption.endOfEpisode) {
-      return 0;
-    }
+    if (!hasNextEpisode || _autoNextDismissed || sleepTimerOption == SleepTimerOption.endOfEpisode) return 0;
     final remainingMs = _duration.inMilliseconds - _position.inMilliseconds;
     final leadMs = AppSpacing.autoNextLeadSeconds * AppSpacing.millisecondsPerSecond;
-    if (_duration.inMilliseconds <= 0 || remainingMs <= 0 || remainingMs > leadMs) {
-      return 0;
-    }
+    if (_duration.inMilliseconds <= 0 || remainingMs <= 0 || remainingMs > leadMs) return 0;
     return (remainingMs / AppSpacing.millisecondsPerSecond).ceil();
   }
 
   bool get showAutoNextCard => autoNextRemainingSeconds > 0;
-  bool get showIntroSkipButton =>
-      currentEntry?.mediaType == 'episode' &&
-      _errorMessage == null &&
-      _duration > Duration.zero &&
-      !_features.introSkipped &&
-      _position.inMilliseconds < effectiveIntroSkipSeconds * AppSpacing.millisecondsPerSecond &&
-      (_features.nextChapterInIntroWindow(_position) != null || effectiveIntroSkipSeconds > 0);
+  bool get showIntroSkipButton {
+    if (currentEntry?.mediaType != 'episode' || _errorMessage != null || _duration <= Duration.zero || _features.introSkipped) return false;
+    final maxWindowMs = AppSpacing.introSkipWindowSeconds * AppSpacing.millisecondsPerSecond;
+    final posMs = _position.inMilliseconds;
+    if (posMs >= maxWindowMs) return false;
+    if (_features.nextChapterInIntroWindow(_position) != null) return true;
+    return posMs < effectiveIntroSkipSeconds * AppSpacing.millisecondsPerSecond;
+  }
 
-  void dismissAutoNext() {
-    _autoNextDismissed = true;
-    _safeNotify();
+  void dismissAutoNext() { _autoNextDismissed = true; _safeNotify(); }
+  void dismissIntroSkip() => _features.dismissIntroSkip();
+
+  void _updateProgressNotifier({bool force = false}) {
+    if (_isDisposed) return;
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final posSec = _position.inSeconds;
+    final durChanged = progressListenable.value.duration != _duration;
+    if (force || durChanged || _position == Duration.zero || posSec != _lastNotifiedPositionSecond || nowMs - _lastProgressNotifyMs >= 250) {
+      _lastNotifiedPositionSecond = posSec;
+      _lastProgressNotifyMs = nowMs;
+      progressListenable.value = (position: _position, duration: _duration);
+    }
   }
 
   void _bindStreams() {
     _subscriptions.addAll([
       _player.stream.playing.listen(_onPlayingChanged),
       _player.stream.position.listen((pos) {
+        final prevIntro = showIntroSkipButton;
+        final prevAutoNext = autoNextRemainingSeconds;
         _position = pos;
-        _safeNotify();
+        _updateProgressNotifier();
+        if (showIntroSkipButton != prevIntro || autoNextRemainingSeconds != prevAutoNext) _safeNotify();
       }),
       _player.stream.duration.listen((dur) {
         _duration = dur;
@@ -187,28 +191,21 @@ class SaphirPlayerController extends ChangeNotifier {
         final pendingMs = dur > Duration.zero ? _pendingStartPositionMs : null;
         if (pendingMs != null) {
           _pendingStartPositionMs = null;
-          if (_position.inMilliseconds < pendingMs - (2 * AppSpacing.millisecondsPerSecond)) {
+          if (pendingMs < dur.inMilliseconds && _position.inMilliseconds < pendingMs - (2 * AppSpacing.millisecondsPerSecond)) {
             unawaited(_player.seek(Duration(milliseconds: pendingMs)));
           }
         }
+        _updateProgressNotifier(force: true);
         _safeNotify();
       }),
-      _player.stream.volume.listen((vol) {
-        _volume = vol;
-        _safeNotify();
-      }),
+      _player.stream.volume.listen((vol) { _volume = vol; _safeNotify(); }),
       _player.stream.tracks.listen((tracks) {
         _audioTracks = tracks.audio;
         _subtitleTracks = tracks.subtitle;
         _applyTrackPreferences();
         _safeNotify();
       }),
-      _player.stream.track.listen((track) {
-        _activeAudioTrack = track.audio;
-        _activeSubtitleTrack = track.subtitle;
-        _saveSeriesPreferences(track.audio, track.subtitle);
-        _safeNotify();
-      }),
+      _player.stream.track.listen((track) { _activeAudioTrack = track.audio; _activeSubtitleTrack = track.subtitle; _safeNotify(); }),
       _player.stream.completed.listen(_onCompletedChanged),
       _player.stream.error.listen((error) {
         if (_isDisposed || error.trim().isEmpty) return;
@@ -243,47 +240,31 @@ class SaphirPlayerController extends ChangeNotifier {
       _overlays.showActionOsd(PlayerActionOsdKind.sleepTimer, AppStrings.sleepTimerTriggeredOsd);
       return;
     }
-    if (hasNextEpisode && !_autoNextDismissed) await playNextEpisode();
+    if (hasNextEpisode && !_autoNextDismissed) await playNextEpisode(skipPersist: true);
   }
-
   void _startProgressTimer() {
     _progressTimer?.cancel();
     _progressTimer = Timer.periodic(const Duration(seconds: AppSpacing.progressSaveIntervalSeconds), (_) => _persistProgress(syncRemote: false));
   }
   void _stopProgressTimer() { _progressTimer?.cancel(); _progressTimer = null; }
-
   void _applyTrackPreferences() {
     final sid = currentEntry?.seriesId;
     final prefs = sid != null ? _persistence.loadSeriesPreferences(sid) : null;
     if (prefs != null) _features.seriesIntroSkipSeconds = prefs.introSkipSeconds;
     final resolved = TrackPreferenceResolver.resolve(
-      seriesPreferences: prefs,
-      audioTracks: _audioTracks,
-      subtitleTracks: _subtitleTracks,
-      activeAudioTrack: _activeAudioTrack,
-      activeSubtitleTrack: _activeSubtitleTrack,
-      subtitlesEnabledByDefault:
-          _settingsController?.subtitlesEnabledByDefault ?? false,
-      preferredSubtitleLanguage: _settingsController?.preferredSubtitleLanguage ??
-          AppStrings.subtitleLangCodeDe,
+      seriesPreferences: prefs, audioTracks: _audioTracks, subtitleTracks: _subtitleTracks,
+      activeAudioTrack: _activeAudioTrack, activeSubtitleTrack: _activeSubtitleTrack,
+      subtitlesEnabledByDefault: _settingsController?.subtitlesEnabledByDefault ?? false,
+      preferredSubtitleLanguage: _settingsController?.preferredSubtitleLanguage ?? AppStrings.subtitleLangCodeDe,
     );
     if (resolved.audio != null) _player.setAudioTrack(resolved.audio!);
-    if (resolved.subtitle != null) {
-      _autoAppliedSubtitleId = resolved.fromSeries ? null : resolved.subtitle!.id;
-      _player.setSubtitleTrack(resolved.subtitle!);
-    }
+    if (resolved.subtitle != null) _player.setSubtitleTrack(resolved.subtitle!);
   }
-
   void _saveSeriesPreferences(AudioTrack audio, SubtitleTrack subtitle) {
     final seriesId = currentEntry?.seriesId;
     if (seriesId == null || (audio.id == 'auto' && subtitle.id == 'auto')) return;
-    if (_autoAppliedSubtitleId != null && subtitle.id == _autoAppliedSubtitleId) {
-      _autoAppliedSubtitleId = null;
-      return;
-    }
     _persistence.saveSeriesPreferences(seriesId, audio.id, subtitle.id);
   }
-
   Future<void> startSession(PlaybackSession newSession) async {
     if (newSession.queue.isEmpty) return;
     _session = newSession;
@@ -300,12 +281,12 @@ class SaphirPlayerController extends ChangeNotifier {
     _errorMessage = null;
     _position = Duration.zero;
     _duration = Duration.zero;
-    _autoAppliedSubtitleId = null;
     _persistence.resetHistoryTracking();
     final entry = s.queue[_currentIndex];
-    final startPosMs = entry.startPositionMs;
+    final startPosMs = _persistence.loadSavedResumePositionMs(entry.mediaKey) ?? entry.startPositionMs;
     _pendingStartPositionMs = startPosMs > 0 ? startPosMs : null;
     _features.resetForEntry(entry);
+    _updateProgressNotifier(force: true);
     _safeNotify();
     final status = await LocalFileService.checkPlayableFile(entry.filePath);
     if (_isDisposed || requestId != _openRequestId) return;
@@ -315,13 +296,10 @@ class SaphirPlayerController extends ChangeNotifier {
       return;
     }
     try {
+      await _mpvBridge.setHardwareDecoding(_settingsController?.hardwareAccelerationEnabled ?? true);
       await _mpvBridge.setProperty('start', 'none');
       await _player.open(Media(entry.filePath, start: startPosMs > 0 ? Duration(milliseconds: startPosMs) : null), play: true);
       if (_isDisposed || requestId != _openRequestId) return;
-      if (startPosMs > 0) {
-        await _player.seek(Duration(milliseconds: startPosMs));
-        if (_position.inMilliseconds >= startPosMs - AppSpacing.millisecondsPerSecond) _pendingStartPositionMs = null;
-      }
       await _features.applySubtitleStyle();
     } catch (_) {
       if (_isDisposed || requestId != _openRequestId) return;
@@ -333,10 +311,10 @@ class SaphirPlayerController extends ChangeNotifier {
     _startProgressTimer();
     registerUserActivity();
   }
+
   Future<void> togglePlayPause() async { registerUserActivity(); await _player.playOrPause(); }
   Future<void> seekRelativeSeconds(int deltaSeconds) async {
-    final targetMs = (_position.inMilliseconds + (deltaSeconds * AppSpacing.millisecondsPerSecond))
-        .clamp(0, _duration.inMilliseconds > 0 ? _duration.inMilliseconds : 1 << 30);
+    final targetMs = (_position.inMilliseconds + (deltaSeconds * AppSpacing.millisecondsPerSecond)).clamp(0, _duration.inMilliseconds > 0 ? _duration.inMilliseconds : 1 << 30);
     await _player.seek(Duration(milliseconds: targetMs));
     _overlays.showActionOsd(deltaSeconds >= 0 ? PlayerActionOsdKind.seekForward : PlayerActionOsdKind.seekBack, Formatters.formatSeekOsd(deltaSeconds));
   }
@@ -364,13 +342,13 @@ class SaphirPlayerController extends ChangeNotifier {
   Future<void> setPlaybackSpeed(double speed) async {
     _playbackSpeed = speed;
     await _player.setRate(speed);
-    _overlays.showActionOsd(PlayerActionOsdKind.speed, Formatters.formatSubtitleScale(speed));
+    _overlays.showActionOsd(PlayerActionOsdKind.speed, Formatters.formatPlaybackSpeed(speed));
     _safeNotify();
   }
-  Future<void> playNextEpisode() async {
+  Future<void> playNextEpisode({bool skipPersist = false}) async {
     if (!hasNextEpisode) return;
     _stopProgressTimer();
-    _persistProgress(syncRemote: true);
+    if (!skipPersist) _persistProgress(syncRemote: true);
     await _openEntryAtIndex(_currentIndex + 1);
   }
   Future<void> playPreviousEpisode() async {
@@ -386,9 +364,18 @@ class SaphirPlayerController extends ChangeNotifier {
     _persistProgress(syncRemote: true);
     await _openEntryAtIndex(index);
   }
-  Future<void> selectAudioTrack(AudioTrack track) async { registerUserActivity(); await _player.setAudioTrack(track); }
-  Future<void> selectSubtitleTrack(SubtitleTrack track) async { registerUserActivity(); _autoAppliedSubtitleId = null; await _player.setSubtitleTrack(track); }
-
+  Future<void> selectAudioTrack(AudioTrack track) async {
+    registerUserActivity();
+    _activeAudioTrack = track;
+    await _player.setAudioTrack(track);
+    _saveSeriesPreferences(_activeAudioTrack, _activeSubtitleTrack);
+  }
+  Future<void> selectSubtitleTrack(SubtitleTrack track) async {
+    registerUserActivity();
+    _activeSubtitleTrack = track;
+    await _player.setSubtitleTrack(track);
+    _saveSeriesPreferences(_activeAudioTrack, _activeSubtitleTrack);
+  }
   Future<void> toggleNightMode() => _features.toggleNightMode();
   Future<void> toggleVolumeBoost() => _features.toggleVolumeBoost(_volume);
   Future<void> setAspectMode(VideoAspectMode m) => _features.setAspectMode(m);
@@ -400,8 +387,9 @@ class SaphirPlayerController extends ChangeNotifier {
   Future<void> loadExternalSubtitle(String dialogTitle) async {
     final path = await _windowAdapter.pickSubtitleFile(dialogTitle);
     if (path == null || _isDisposed) return;
-    _autoAppliedSubtitleId = null;
-    await _player.setSubtitleTrack(SubtitleTrack.uri(path));
+    final track = SubtitleTrack.uri(path);
+    _activeSubtitleTrack = track;
+    await _player.setSubtitleTrack(track);
     _overlays.showActionOsd(PlayerActionOsdKind.subtitle, AppStrings.osdExternalSubLoaded);
   }
   Future<void> updateLiveSubtitleStyle({double? scale, int? position, double? bgOpacity}) => _features.updateLiveSubtitleStyle(scale: scale, position: position, bgOpacity: bgOpacity);
@@ -447,26 +435,37 @@ class SaphirPlayerController extends ChangeNotifier {
     await _windowAdapter.setFullScreen(_isFullscreen);
     _safeNotify();
   }
+  void setMenuOrDialogOpen(bool open) {
+    _isMenuOrDialogOpen = open;
+    if (open) { _hudHideTimer?.cancel(); _isHudVisible = true; _safeNotify(); } else { registerUserActivity(); }
+  }
   void registerUserActivity() => showHud(keepVisibleWhilePaused: !_isPlaying);
   void showHud({bool keepVisibleWhilePaused = false}) {
     if (!_isHudVisible) { _isHudVisible = true; _safeNotify(); }
     _hudHideTimer?.cancel();
-    if (keepVisibleWhilePaused) return;
+    if (keepVisibleWhilePaused || _isMenuOrDialogOpen) return;
     _hudHideTimer = Timer(const Duration(seconds: AppSpacing.hudAutoHideSeconds), () {
-      if (!_isDisposed && _isPlaying && _isHudVisible) { _isHudVisible = false; _safeNotify(); }
+      if (!_isDisposed && _isPlaying && _isHudVisible && !_isMenuOrDialogOpen) { _isHudVisible = false; _safeNotify(); }
     });
   }
   Future<void> stopAndClose() async {
     _openRequestId++;
+    _isMenuOrDialogOpen = false;
     _hudHideTimer?.cancel();
     _stopProgressTimer();
     _overlays.resetForClose();
     _persistence.recordWatchHistorySlice(currentEntry, isPlaying: false);
     _persistProgress(syncRemote: true);
+    _playbackSpeed = 1.0;
+    await _player.setRate(1.0);
+    await _features.resetForClose();
     await _player.stop();
     await _features.exitMiniPlayer();
     if (_isFullscreen) { _isFullscreen = false; await _windowAdapter.setFullScreen(false); }
     _persistence.resetHistoryTracking();
+    _position = Duration.zero;
+    _duration = Duration.zero;
+    _updateProgressNotifier(force: true);
     _session = null;
     _safeNotify();
   }
@@ -475,7 +474,7 @@ class SaphirPlayerController extends ChangeNotifier {
     if (entry == null) return;
     if (_isPlaying) _persistence.recordWatchHistorySlice(entry, isPlaying: true);
     _persistence.persistProgress(entry: entry, positionMs: _position.inMilliseconds, durationMs: _duration.inMilliseconds, forceCompleted: forceCompleted);
-    if (syncRemote) unawaited(_syncService.syncWithStorage(_getNasPath()));
+    if (syncRemote) unawaited(_syncService.syncWithRoots(_getNasPaths()));
   }
   void _safeNotify() { if (!_isDisposed) notifyListeners(); }
   @override
@@ -485,6 +484,7 @@ class SaphirPlayerController extends ChangeNotifier {
     _hudHideTimer?.cancel();
     _stopProgressTimer();
     _overlays.dispose();
+    progressListenable.dispose();
     for (final sub in _subscriptions) { sub.cancel(); }
     _subscriptions.clear();
     _player.dispose();

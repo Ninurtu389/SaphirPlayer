@@ -8,6 +8,16 @@ import 'package:path/path.dart' as p;
 import '../../core/constants/app_spacing.dart';
 import '../../core/storage/portable_paths.dart';
 
+class ThumbnailGenerationResult {
+  const ThumbnailGenerationResult({
+    this.fileName,
+    this.durationMs,
+  });
+
+  final String? fileName;
+  final int? durationMs;
+}
+
 class ThumbnailMediaKitSession {
   ThumbnailMediaKitSession._({
     required this.player,
@@ -65,13 +75,26 @@ class ThumbnailMediaKitSession {
 class ThumbnailGeneratorService {
   ThumbnailGeneratorService._();
 
-  static Future<String?> generateEpisodeThumbnail({
+  static bool _ffmpegResolved = false;
+  static String? _cachedFfmpegExe;
+  static bool _ffprobeResolved = false;
+  static String? _cachedFfprobeExe;
+
+  @visibleForTesting
+  static void resetExecutableCacheForTesting() {
+    _ffmpegResolved = false;
+    _cachedFfmpegExe = null;
+    _ffprobeResolved = false;
+    _cachedFfprobeExe = null;
+  }
+
+  static Future<ThumbnailGenerationResult?> generateEpisodeThumbnail({
     required String videoFilePath,
     required int durationMs,
-    required bool isPlaybackActive,
+    required bool Function() isPlaybackActive,
     ThumbnailMediaKitSession? mediaKitSession,
     bool allowMediaKitFallback = true,
-  }) async {
+  }) {
     return generateThumbnail(
       videoFilePath: videoFilePath,
       durationMs: durationMs,
@@ -82,15 +105,15 @@ class ThumbnailGeneratorService {
     );
   }
 
-  static Future<String?> generateThumbnail({
+  static Future<ThumbnailGenerationResult?> generateThumbnail({
     required String videoFilePath,
     required int durationMs,
-    required bool isPlaybackActive,
+    required bool Function() isPlaybackActive,
     String prefix = 'ep',
     ThumbnailMediaKitSession? mediaKitSession,
     bool allowMediaKitFallback = true,
   }) async {
-    if (isPlaybackActive) {
+    if (isPlaybackActive()) {
       return null;
     }
 
@@ -108,13 +131,14 @@ class ThumbnailGeneratorService {
 
     final cacheDir = await PortablePaths.getCacheDirectory();
     final hashName = _stablePathHash(videoFilePath);
-    final outputPath = p.join(cacheDir, '${prefix}_$hashName.jpg');
+    final fileName = '${prefix}_$hashName.jpg';
+    final outputPath = p.join(cacheDir, fileName);
     final outputFile = File(outputPath);
 
     if (await outputFile.exists()) {
       try {
         if (await outputFile.length() > 0) {
-          return outputPath;
+          return ThumbnailGenerationResult(fileName: fileName);
         }
         await outputFile.delete();
       } on FileSystemException {
@@ -122,42 +146,67 @@ class ThumbnailGeneratorService {
       }
     }
 
-    final seekSeconds = _computeSeekSeconds(durationMs);
-
-    final ffmpegResult = await _tryGenerateWithFfmpeg(
-      videoFilePath: videoFilePath,
-      seekSeconds: seekSeconds,
-      outputPath: outputPath,
-    );
-    if (ffmpegResult != null) {
-      return ffmpegResult;
-    }
-
-    if (isPlaybackActive || !allowMediaKitFallback) {
+    if (isPlaybackActive()) {
       return null;
     }
 
-    return _tryGenerateWithMediaKit(
+    final seekSeconds = _computeSeekSeconds(durationMs);
+
+    final ffmpegOk = await _tryGenerateWithFfmpeg(
+      videoFilePath: videoFilePath,
+      seekSeconds: seekSeconds,
+      outputPath: outputPath,
+      isPlaybackActive: isPlaybackActive,
+    );
+    if (ffmpegOk) {
+      int? probedDurationMs;
+      if (durationMs <= 0 && !isPlaybackActive()) {
+        probedDurationMs = await _probeDurationWithFfprobe(videoFilePath);
+      }
+      return ThumbnailGenerationResult(
+        fileName: fileName,
+        durationMs: probedDurationMs,
+      );
+    }
+
+    if (isPlaybackActive() || !allowMediaKitFallback) {
+      return null;
+    }
+
+    final mkResult = await _tryGenerateWithMediaKit(
       videoFilePath: videoFilePath,
       durationMs: durationMs,
       seekSeconds: seekSeconds,
       outputPath: outputPath,
+      isPlaybackActive: isPlaybackActive,
       session: mediaKitSession,
+    );
+    if (!mkResult.ok) {
+      return null;
+    }
+    return ThumbnailGenerationResult(
+      fileName: fileName,
+      durationMs: mkResult.durationMs,
     );
   }
 
-  static Future<String?> _tryGenerateWithFfmpeg({
+  static Future<bool> _tryGenerateWithFfmpeg({
     required String videoFilePath,
     required int seekSeconds,
     required String outputPath,
+    required bool Function() isPlaybackActive,
   }) async {
-    final ffmpegExe = _resolveFfmpegExecutable();
-    if (ffmpegExe == null) {
-      return null;
+    if (isPlaybackActive()) {
+      return false;
+    }
+    final ffmpegExe = await _resolveFfmpegExecutable();
+    if (ffmpegExe == null || isPlaybackActive()) {
+      return false;
     }
 
+    Process? process;
     try {
-      final result = await Process.run(
+      process = await Process.start(
         ffmpegExe,
         [
           '-y',
@@ -175,35 +224,89 @@ class ThumbnailGeneratorService {
         ],
         runInShell: false,
       );
+      unawaited(process.stdout.drain<void>());
+      unawaited(process.stderr.drain<void>());
 
+      final exitCode = await process.exitCode.timeout(
+        const Duration(seconds: AppSpacing.ffmpegTimeoutSeconds),
+      );
       final outFile = File(outputPath);
-      if (result.exitCode == 0 &&
+      if (exitCode == 0 &&
+          !isPlaybackActive() &&
           await outFile.exists() &&
           await outFile.length() > 0) {
-        return outputPath;
+        return true;
       }
-      if (await outFile.exists()) {
-        await outFile.delete();
+      await _deleteIfExists(outFile);
+      return false;
+    } on TimeoutException {
+      process?.kill();
+      await _deleteIfExists(File(outputPath));
+      return false;
+    } on ProcessException {
+      return false;
+    }
+  }
+
+  static Future<int?> _probeDurationWithFfprobe(String videoFilePath) async {
+    final ffprobeExe = await _resolveFfprobeExecutable();
+    if (ffprobeExe == null) {
+      return null;
+    }
+    Process? process;
+    try {
+      process = await Process.start(
+        ffprobeExe,
+        [
+          '-v',
+          'error',
+          '-show_entries',
+          'format=duration',
+          '-of',
+          'default=noprint_wrappers=1:nokey=1',
+          videoFilePath,
+        ],
+        runInShell: false,
+      );
+      final stdoutFuture = process.stdout.transform(utf8.decoder).join();
+      unawaited(process.stderr.drain<void>());
+      final exitCode = await process.exitCode.timeout(
+        const Duration(seconds: AppSpacing.ffmpegTimeoutSeconds),
+      );
+      if (exitCode != 0) {
+        return null;
       }
+      final raw = (await stdoutFuture).trim();
+      final seconds = double.tryParse(raw);
+      if (seconds != null && seconds > 0 && seconds.isFinite) {
+        return (seconds * AppSpacing.millisecondsPerSecond).round();
+      }
+      return null;
+    } on TimeoutException {
+      process?.kill();
       return null;
     } on ProcessException {
       return null;
     }
   }
 
-  static Future<String?> _tryGenerateWithMediaKit({
+  static Future<({bool ok, int? durationMs})> _tryGenerateWithMediaKit({
     required String videoFilePath,
     required int durationMs,
     required int seekSeconds,
     required String outputPath,
+    required bool Function() isPlaybackActive,
     ThumbnailMediaKitSession? session,
   }) async {
     ThumbnailMediaKitSession? ownedSession;
     try {
+      if (isPlaybackActive()) {
+        return (ok: false, durationMs: null);
+      }
       final activeSession =
           session ?? (ownedSession = await ThumbnailMediaKitSession.create());
-      if (activeSession == null) {
-        return null;
+      if (activeSession == null || isPlaybackActive()) {
+        return (ok: false, durationMs: null);
       }
 
       final player = activeSession.player;
@@ -214,9 +317,9 @@ class ThumbnailGeneratorService {
       final width = await player.stream.width
           .firstWhere((w) => w != null && w > 0)
           .timeout(const Duration(seconds: 5), onTimeout: () => null);
-      if (width == null || width <= 0) {
+      if (width == null || width <= 0 || isPlaybackActive()) {
         await player.stop();
-        return null;
+        return (ok: false, durationMs: null);
       }
 
       var effectiveSeekSeconds = seekSeconds;
@@ -240,9 +343,26 @@ class ThumbnailGeneratorService {
         }
       }
 
+      if (isPlaybackActive()) {
+        await player.stop();
+        return (ok: false, durationMs: null);
+      }
+
       await player.seek(Duration(seconds: effectiveSeekSeconds));
-      await Future<void>.delayed(const Duration(milliseconds: 350));
+      await player.stream.position
+          .firstWhere(
+            (pos) => (pos.inSeconds - effectiveSeekSeconds).abs() <= 2,
+          )
+          .timeout(
+            const Duration(milliseconds: AppSpacing.thumbnailSeekWaitTimeoutMs),
+            onTimeout: () => player.state.position,
+          );
       await player.pause();
+
+      if (isPlaybackActive()) {
+        await player.stop();
+        return (ok: false, durationMs: null);
+      }
 
       final bytes = await player.screenshot(format: 'image/jpeg');
       await player.stop();
@@ -250,17 +370,29 @@ class ThumbnailGeneratorService {
       if (bytes != null && bytes.isNotEmpty) {
         await File(outputPath).writeAsBytes(bytes, flush: true);
         if (await File(outputPath).exists()) {
-          return outputPath;
+          final detectedMs =
+              knownDuration.inMilliseconds > 0 ? knownDuration.inMilliseconds : null;
+          return (ok: true, durationMs: detectedMs);
         }
       }
-      return null;
+      return (ok: false, durationMs: null);
     } catch (e) {
       debugPrint('ThumbnailGeneratorService: media_kit error: $e');
-      return null;
+      return (ok: false, durationMs: null);
     } finally {
       if (ownedSession != null) {
         await ownedSession.dispose();
       }
+    }
+  }
+
+  static Future<void> _deleteIfExists(File file) async {
+    try {
+      if (await file.exists()) {
+        await file.delete();
+      }
+    } on FileSystemException {
+      // Unvollständige Cache-Datei ignorieren
     }
   }
 
@@ -279,13 +411,47 @@ class ThumbnailGeneratorService {
     return '$hexA$hexB';
   }
 
-  static String? _resolveFfmpegExecutable() {
-    final exeDir = p.dirname(Platform.resolvedExecutable);
-    final localFfmpeg = File(p.join(exeDir, 'ffmpeg.exe'));
-    if (localFfmpeg.existsSync()) {
-      return localFfmpeg.path;
+  static Future<String?> _resolveFfmpegExecutable() async {
+    if (_ffmpegResolved) {
+      return _cachedFfmpegExe;
     }
-    return 'ffmpeg';
+    _cachedFfmpegExe = await _probeExecutable('ffmpeg', 'ffmpeg.exe');
+    _ffmpegResolved = true;
+    return _cachedFfmpegExe;
+  }
+
+  static Future<String?> _resolveFfprobeExecutable() async {
+    if (_ffprobeResolved) {
+      return _cachedFfprobeExe;
+    }
+    _cachedFfprobeExe = await _probeExecutable('ffprobe', 'ffprobe.exe');
+    _ffprobeResolved = true;
+    return _cachedFfprobeExe;
+  }
+
+  static Future<String?> _probeExecutable(String command, String winName) async {
+    final exeDir = p.dirname(Platform.resolvedExecutable);
+    final localExe = File(p.join(exeDir, winName));
+    if (localExe.existsSync()) {
+      return localExe.path;
+    }
+    Process? process;
+    try {
+      process = await Process.start(
+        command,
+        const ['-version'],
+        runInShell: false,
+      );
+      unawaited(process.stdout.drain<void>());
+      unawaited(process.stderr.drain<void>());
+      final code = await process.exitCode.timeout(const Duration(seconds: 2));
+      return code == 0 ? command : null;
+    } on TimeoutException {
+      process?.kill();
+      return null;
+    } on ProcessException {
+      return null;
+    }
   }
 
   static int _computeSeekSeconds(int durationMs) {
@@ -294,6 +460,14 @@ class ThumbnailGeneratorService {
     }
     final targetMs = (durationMs * AppSpacing.thumbnailSeekRatio).round();
     final seconds = (targetMs / AppSpacing.millisecondsPerSecond).round();
+    final shortThresholdMs =
+        AppSpacing.thumbnailShortVideoThresholdSeconds *
+            AppSpacing.millisecondsPerSecond;
+    if (durationMs < shortThresholdMs) {
+      return seconds < AppSpacing.thumbnailShortVideoSeekSeconds
+          ? AppSpacing.thumbnailShortVideoSeekSeconds
+          : seconds;
+    }
     return seconds < 5 ? 5 : seconds;
   }
 }

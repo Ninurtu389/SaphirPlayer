@@ -4,6 +4,7 @@ import '../../core/constants/app_spacing.dart';
 import '../../core/constants/app_strings.dart';
 import '../../core/services/local_file_service.dart';
 import '../../core/theme/effect_mode.dart';
+import '../../core/utils/formatters.dart';
 import 'library_models.dart';
 import 'widgets/episode_row.dart';
 
@@ -101,10 +102,7 @@ class _SeriesDetailHeader extends StatelessWidget {
         LocalFileService.imageProviderForPath(detail.posterPath);
     final isGlass = effectMode == EffectMode.glass;
     final resumeEp = detail.nextResumeEpisode;
-
-    final playButtonLabel = resumeEp != null && resumeEp.positionMs > 0
-        ? '${AppStrings.resumeButton} (S${resumeEp.seasonNumber.toString().padLeft(2, '0')}E${resumeEp.episodeNumber.toString().padLeft(2, '0')})'
-        : AppStrings.playEpisodeOneButton;
+    final playButtonLabel = Formatters.formatSeriesPlayButton(resumeEp);
 
     return SizedBox(
       height: AppSpacing.seriesDetailHeaderHeight,
@@ -226,7 +224,10 @@ class _HeaderInfoOverlay extends StatelessWidget {
               Row(
                 children: [
                   Text(
-                    '${detail.watchedEpisodes} / ${detail.totalEpisodes} ${AppStrings.episodesCountLabel} ${AppStrings.watchedBadge.toLowerCase()}',
+                    Formatters.formatSeriesWatchedProgress(
+                      detail.watchedEpisodes,
+                      detail.totalEpisodes,
+                    ),
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(width: AppSpacing.md),

@@ -1,40 +1,94 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:path/path.dart' as p;
+import 'package:sqlite3/sqlite3.dart';
 import 'database_service.dart';
 import 'portable_paths.dart';
+
+class SyncResult {
+  const SyncResult({
+    required this.syncedToNas,
+    required this.targetPath,
+  });
+
+  final bool syncedToNas;
+  final String targetPath;
+}
 
 class ProgressSyncService {
   ProgressSyncService(this._databaseService);
 
   final DatabaseService _databaseService;
   static const String _syncFileName = 'progress_sync.json';
+  Future<void> _syncQueue = Future<void>.value();
 
-  Future<String> _resolveSyncFilePath(String nasRootPath) async {
+  Future<T> _enqueue<T>(Future<T> Function() task) {
+    final completer = Completer<T>();
+    Zone.root.run(() {
+      _syncQueue = _syncQueue.then(
+        (_) => _runTask(task, completer),
+        onError: (_) => _runTask(task, completer),
+      );
+    });
+    return completer.future;
+  }
+
+  Future<void> _runTask<T>(
+    Future<T> Function() task,
+    Completer<T> completer,
+  ) async {
+    try {
+      final result = await task();
+      if (!completer.isCompleted) {
+        completer.complete(result);
+      }
+    } catch (e, st) {
+      if (!completer.isCompleted) {
+        completer.completeError(e, st);
+      }
+    }
+  }
+
+  Future<({String path, bool isNas})> _resolveSyncTarget(
+    String nasRootPath,
+  ) async {
     final trimmed = nasRootPath.trim();
     if (trimmed.isNotEmpty) {
       final nasDir = Directory(trimmed);
       if (await nasDir.exists()) {
-        return p.join(trimmed, _syncFileName);
+        return (path: p.join(trimmed, _syncFileName), isNas: true);
       }
     }
     final dataDir = await PortablePaths.getDataDirectory();
-    return p.join(dataDir, _syncFileName);
+    return (path: p.join(dataDir, _syncFileName), isNas: false);
   }
 
-  Future<void> syncWithRoots(List<String> nasRootPaths) async {
-    for (final root in nasRootPaths) {
-      final trimmed = root.trim();
-      if (trimmed.isNotEmpty && await Directory(trimmed).exists()) {
-        await syncWithStorage(trimmed);
-        return;
+  Future<SyncResult> syncWithRoots(List<String> nasRootPaths) {
+    return _enqueue(() async {
+      for (final root in nasRootPaths) {
+        final trimmed = root.trim();
+        if (trimmed.isNotEmpty && await Directory(trimmed).exists()) {
+          return _performSync(trimmed);
+        }
       }
-    }
-    await syncWithStorage('');
+      return _performSync('');
+    });
   }
 
-  Future<void> syncWithStorage(String nasRootPath) async {
-    final syncPath = await _resolveSyncFilePath(nasRootPath);
+  Future<SyncResult> syncWithStorage(String nasRootPath) {
+    return _enqueue(() => _performSync(nasRootPath));
+  }
+
+  Future<SyncResult> _performSync(String nasRootPath) async {
+    if (!_databaseService.isOpen) {
+      return const SyncResult(syncedToNas: false, targetPath: '');
+    }
+    final target = await _resolveSyncTarget(nasRootPath);
+    if (!_databaseService.isOpen) {
+      return SyncResult(syncedToNas: false, targetPath: target.path);
+    }
+    final syncPath = target.path;
     final syncFile = File(syncPath);
     final db = _databaseService.instance;
 
@@ -62,6 +116,12 @@ class ProgressSyncService {
         // Beschädigte Sync-Datei nicht zum Absturz führen lassen
       }
     }
+
+    if (!_databaseService.isOpen) {
+      return SyncResult(syncedToNas: false, targetPath: syncPath);
+    }
+
+    _normalizeLocalLegacyKeys(db);
 
     final localRows = db.select(
       '''
@@ -171,15 +231,99 @@ class ProgressSyncService {
       rethrow;
     }
 
+    var writeSucceeded = false;
+    final tmpFile = File('$syncPath.tmp');
     try {
       final payload = jsonEncode({
         'version': 1,
         'updated_at': DateTime.now().millisecondsSinceEpoch,
         'entries': mergedEntries,
       });
-      await syncFile.writeAsString(payload, flush: true);
+      await tmpFile.writeAsString(payload, flush: true);
+      await tmpFile.rename(syncPath);
+      writeSucceeded = true;
     } on FileSystemException {
-      // Lokaler Fortschritt bleibt erhalten, falls NAS gerade nicht beschreibbar ist
+      if (await tmpFile.exists()) {
+        try {
+          await tmpFile.delete();
+        } on FileSystemException {
+          // Best-effort Cleanup fehlgeschlagener Temp-Datei
+        }
+      }
+    }
+
+    return SyncResult(
+      syncedToNas: target.isNas && writeSucceeded,
+      targetPath: syncPath,
+    );
+  }
+
+  void _normalizeLocalLegacyKeys(Database db) {
+    final mappings = <(String legacyKey, String syncKey)>[];
+    final epRows = db.select(
+      "SELECT id, sync_key FROM episodes WHERE sync_key IS NOT NULL AND sync_key != '';",
+    );
+    for (final row in epRows) {
+      mappings.add(('episode_${row['id']}', row['sync_key'] as String));
+    }
+    final mvRows = db.select(
+      "SELECT id, sync_key FROM movies WHERE sync_key IS NOT NULL AND sync_key != '';",
+    );
+    for (final row in mvRows) {
+      mappings.add(('movie_${row['id']}', row['sync_key'] as String));
+    }
+    if (mappings.isEmpty) {
+      return;
+    }
+
+    db.execute('BEGIN TRANSACTION;');
+    try {
+      for (final (legacyKey, syncKey) in mappings) {
+        final legacyRows = db.select(
+          'SELECT * FROM watch_progress WHERE media_key = ? LIMIT 1;',
+          [legacyKey],
+        );
+        if (legacyRows.isEmpty) continue;
+        final existingNew = db.select(
+          'SELECT updated_at FROM watch_progress WHERE media_key = ? LIMIT 1;',
+          [syncKey],
+        );
+        if (existingNew.isEmpty) {
+          db.execute(
+            'UPDATE watch_progress SET media_key = ? WHERE media_key = ?;',
+            [syncKey, legacyKey],
+          );
+        } else {
+          final oldRow = legacyRows.first;
+          final oldUpdated = (oldRow['updated_at'] as int?) ?? 0;
+          final newUpdated = (existingNew.first['updated_at'] as int?) ?? 0;
+          if (oldUpdated > newUpdated) {
+            db.execute(
+              '''
+              UPDATE watch_progress
+              SET position_ms = ?, duration_ms = ?, completed = ?, updated_at = ?, source_device = ?
+              WHERE media_key = ?;
+              ''',
+              [
+                oldRow['position_ms'],
+                oldRow['duration_ms'],
+                oldRow['completed'],
+                oldUpdated,
+                oldRow['source_device'],
+                syncKey,
+              ],
+            );
+          }
+          db.execute(
+            'DELETE FROM watch_progress WHERE media_key = ?;',
+            [legacyKey],
+          );
+        }
+      }
+      db.execute('COMMIT;');
+    } catch (_) {
+      db.execute('ROLLBACK;');
+      rethrow;
     }
   }
 
