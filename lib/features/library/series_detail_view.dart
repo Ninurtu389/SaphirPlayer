@@ -71,7 +71,6 @@ class _SeriesDetailViewState extends State<SeriesDetailView> {
                     final ep = activeSeason.episodes[index];
                     return EpisodeRow(
                       episode: ep,
-                      effectMode: widget.effectMode,
                       onPlay: () => widget.onPlayEpisode(ep),
                       onToggleWatched: () => widget.onToggleWatched(ep),
                     );
@@ -98,8 +97,11 @@ class _SeriesDetailHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final imageProvider =
-        LocalFileService.imageProviderForPath(detail.posterPath);
+    final imageProvider = LocalFileService.imageProviderForPath(
+      detail.posterPath,
+      cacheWidth: AppSpacing.heroCacheWidth,
+      cacheHeight: AppSpacing.heroCacheHeight,
+    );
     final isGlass = effectMode == EffectMode.glass;
     final resumeEp = detail.nextResumeEpisode;
     final playButtonLabel = Formatters.formatSeriesPlayButton(resumeEp);
@@ -111,17 +113,15 @@ class _SeriesDetailHeader extends StatelessWidget {
         fit: StackFit.expand,
         children: [
           if (imageProvider != null)
-            Image(image: imageProvider, fit: BoxFit.cover)
+            Image(
+              image: imageProvider,
+              fit: BoxFit.cover,
+              gaplessPlayback: true,
+              errorBuilder: (_, __, ___) =>
+                  _SeriesPosterFallback(title: detail.title),
+            )
           else
-            DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: AppColors.coverGradientForTitle(detail.title),
-                ),
-              ),
-            ),
+            _SeriesPosterFallback(title: detail.title),
           if (isGlass)
             const DecoratedBox(
               decoration: BoxDecoration(
@@ -262,6 +262,25 @@ class _HeaderInfoOverlay extends StatelessWidget {
   }
 }
 
+class _SeriesPosterFallback extends StatelessWidget {
+  const _SeriesPosterFallback({required this.title});
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: AppColors.coverGradientForTitle(title),
+        ),
+      ),
+    );
+  }
+}
+
 class _SeasonTabs extends StatelessWidget {
   const _SeasonTabs({
     required this.seasons,
@@ -300,7 +319,7 @@ class _SeasonTabs extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      '${AppStrings.seasonPrefix} ${season.seasonNumber}',
+                      Formatters.formatSeasonTabLabel(season.seasonNumber),
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                             color: selected
                                 ? AppColors.textPrimary

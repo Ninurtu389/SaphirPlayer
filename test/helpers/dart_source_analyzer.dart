@@ -355,4 +355,100 @@ class DartSourceAnalyzer {
     }
     return layers;
   }
+
+  static List<SourceViolation> findSyncIoCallsInUi(File file) {
+    final lines = file.readAsLinesSync();
+    final violations = <SourceViolation>[];
+    final path = normalizePath(file.path);
+    final syncIoRegex =
+        RegExp(r'\.(?:existsSync|listSync|deleteSync|statSync)\s*\(');
+
+    for (var i = 0; i < lines.length; i++) {
+      final line = lines[i];
+      if (line.trimLeft().startsWith('//')) continue;
+      final match = syncIoRegex.firstMatch(line);
+      if (match != null) {
+        violations.add(
+          SourceViolation(
+            filePath: path,
+            line: i + 1,
+            category: 'SyncIoInUi',
+            detail: match.group(0)!,
+          ),
+        );
+      }
+    }
+    return violations;
+  }
+
+  static List<SourceViolation> findDirectPlatformOrNativeAccess(File file) {
+    final lines = file.readAsLinesSync();
+    final violations = <SourceViolation>[];
+    final path = normalizePath(file.path);
+    final forbiddenRegex = RegExp(
+      r'''package:(?:window_manager|file_picker)/|\bNativePlayer\b''',
+    );
+
+    for (var i = 0; i < lines.length; i++) {
+      final line = lines[i];
+      if (line.trimLeft().startsWith('//')) continue;
+      final match = forbiddenRegex.firstMatch(line);
+      if (match != null) {
+        violations.add(
+          SourceViolation(
+            filePath: path,
+            line: i + 1,
+            category: 'DirectNativeOrPlatformAccess',
+            detail: line.trim(),
+          ),
+        );
+      }
+    }
+    return violations;
+  }
+
+  static List<SourceViolation> findUnusedPublicTokens(List<File> libFiles) {
+    const tokenFiles = {
+      'lib/core/constants/app_colors.dart',
+      'lib/core/constants/app_spacing.dart',
+      'lib/core/constants/app_strings.dart',
+      'lib/core/utils/formatters.dart',
+    };
+    final declRegex = RegExp(
+      r'^\s*static\s+(?:const\s+\S+\s+|[\w<>?()]+\s+)([a-zA-Z][a-zA-Z0-9_]*)\s*(?:=|\(|=>)',
+    );
+    final contentsByPath = <String, String>{
+      for (final f in libFiles) normalizePath(f.path): f.readAsStringSync(),
+    };
+    final violations = <SourceViolation>[];
+
+    for (final file in libFiles) {
+      final path = normalizePath(file.path);
+      if (!tokenFiles.contains(path)) continue;
+      final lines = file.readAsLinesSync();
+      for (var i = 0; i < lines.length; i++) {
+        final match = declRegex.firstMatch(lines[i]);
+        if (match == null) continue;
+        final name = match.group(1)!;
+        if (name.startsWith('_')) continue;
+        final wordRegex = RegExp('\\b$name\\b');
+        var totalHits = 0;
+        for (final content in contentsByPath.values) {
+          totalHits += wordRegex.allMatches(content).length;
+          if (totalHits > 1) break;
+        }
+        if (totalHits <= 1) {
+          violations.add(
+            SourceViolation(
+              filePath: path,
+              line: i + 1,
+              category: 'UnusedPublicToken',
+              detail: name,
+            ),
+          );
+        }
+      }
+    }
+    return violations;
+  }
 }

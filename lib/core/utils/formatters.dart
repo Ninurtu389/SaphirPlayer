@@ -74,11 +74,25 @@ class Formatters {
     return parts.join(AppStrings.metadataSeparator);
   }
 
+  static String formatMediaTileSubtitle(String subtitle, String? artist) =>
+      formatPlayerHudSubtitle(subtitle, artist);
+
+  static String formatSeasonTabLabel(int seasonNumber) =>
+      '${AppStrings.seasonPrefix} $seasonNumber';
+
+  static String formatEpisodeDurationMinutes(int durationMs) {
+    if (durationMs <= 0) {
+      return '';
+    }
+    final minutes = (durationMs / AppSpacing.millisecondsPerMinute).round();
+    return '$minutes ${AppStrings.statsMinutesShort}';
+  }
+
   static String formatEpisodeRowMeta(int durationMs, String? artist) {
     final parts = <String>[];
-    if (durationMs > 0) {
-      final minutes = (durationMs / AppSpacing.millisecondsPerMinute).round();
-      parts.add('$minutes ${AppStrings.statsMinutesShort}');
+    final durationText = formatEpisodeDurationMinutes(durationMs);
+    if (durationText.isNotEmpty) {
+      parts.add(durationText);
     }
     final cleanArtist = artist?.trim();
     if (cleanArtist != null && cleanArtist.isNotEmpty) {
@@ -183,11 +197,19 @@ class Formatters {
     return '$watched / $total ${AppStrings.episodesCountLabel} ${AppStrings.watchedBadge.toLowerCase()}';
   }
 
-  static String formatHeroInfoLine(String subtitle, int remainingMinutes) {
+  static String formatHeroInfoLine(
+    String subtitle,
+    int remainingMinutes, {
+    String? artist,
+  }) {
+    final base = formatPlayerHudSubtitle(subtitle, artist);
     if (remainingMinutes > 0) {
-      return '$subtitle · ${formatRemainingMinutes(remainingMinutes)}';
+      if (base.isEmpty) {
+        return formatRemainingMinutes(remainingMinutes);
+      }
+      return '$base${AppStrings.metadataSeparator}${formatRemainingMinutes(remainingMinutes)}';
     }
-    return subtitle;
+    return base;
   }
 
   static String formatPercent(num fractionOrPercent, {bool isFraction = true}) {

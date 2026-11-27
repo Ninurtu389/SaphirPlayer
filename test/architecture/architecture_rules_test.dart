@@ -194,5 +194,54 @@ void main() {
             'UI dependencies in business/service/storage layer:\n${violations.join('\n')}',
       );
     });
+
+    test(
+        'UI files must not call synchronous filesystem IO (existsSync/listSync/deleteSync/statSync)',
+        () {
+      final violations = <SourceViolation>[];
+      for (final file in libFiles) {
+        final path = DartSourceAnalyzer.normalizePath(file.path);
+        if (!DartSourceAnalyzer.isUiFile(path)) {
+          continue;
+        }
+        violations.addAll(DartSourceAnalyzer.findSyncIoCallsInUi(file));
+      }
+      expect(
+        violations,
+        isEmpty,
+        reason: 'Sync filesystem IO in UI:\n${violations.join('\n')}',
+      );
+    });
+
+    test(
+        'UI and Controller files must not directly import window_manager, file_picker, or NativePlayer',
+        () {
+      final violations = <SourceViolation>[];
+      for (final file in libFiles) {
+        final path = DartSourceAnalyzer.normalizePath(file.path);
+        if (!DartSourceAnalyzer.isUiFile(path) &&
+            !path.endsWith('_controller.dart')) {
+          continue;
+        }
+        violations
+            .addAll(DartSourceAnalyzer.findDirectPlatformOrNativeAccess(file));
+      }
+      expect(
+        violations,
+        isEmpty,
+        reason:
+            'Uncapsulated platform/native access:\n${violations.join('\n')}',
+      );
+    });
+
+    test('Constant tokens and Formatters must have no unused public members',
+        () {
+      final violations = DartSourceAnalyzer.findUnusedPublicTokens(libFiles);
+      expect(
+        violations,
+        isEmpty,
+        reason: 'Unused public tokens/methods:\n${violations.join('\n')}',
+      );
+    });
   });
 }

@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_spacing.dart';
 import '../../../core/constants/app_strings.dart';
+import '../../../core/theme/effect_mode.dart';
 import '../../../core/utils/formatters.dart';
 import '../stats_models.dart';
 
@@ -9,9 +10,11 @@ class StatsCard extends StatelessWidget {
   const StatsCard({
     super.key,
     required this.child,
+    this.effectMode = EffectMode.lean,
   });
 
   final Widget child;
+  final EffectMode effectMode;
 
   @override
   Widget build(BuildContext context) {
@@ -21,6 +24,11 @@ class StatsCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppColors.anthraciteSurface,
         borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(
+          color: effectMode == EffectMode.glass
+              ? AppColors.sapphireGlow
+              : AppColors.borderSubtle,
+        ),
       ),
       child: child,
     );
@@ -34,16 +42,19 @@ class StatsKpiCard extends StatelessWidget {
     required this.title,
     required this.value,
     required this.subtitle,
+    this.effectMode = EffectMode.lean,
   });
 
   final IconData icon;
   final String title;
   final String value;
   final String subtitle;
+  final EffectMode effectMode;
 
   @override
   Widget build(BuildContext context) {
     return StatsCard(
+      effectMode: effectMode,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -90,10 +101,12 @@ class WeekdayChartCard extends StatelessWidget {
     super.key,
     required this.weekdayWatchMs,
     required this.busiestIndex,
+    this.effectMode = EffectMode.lean,
   });
 
   final List<int> weekdayWatchMs;
   final int? busiestIndex;
+  final EffectMode effectMode;
 
   @override
   Widget build(BuildContext context) {
@@ -105,6 +118,7 @@ class WeekdayChartCard extends StatelessWidget {
     }
 
     return StatsCard(
+      effectMode: effectMode,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -160,7 +174,9 @@ class _WeekdayBarItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ratio = maxMs > 0 ? (ms / maxMs).clamp(0.0, 1.0) : 0.0;
+    final ratio = maxMs > 0
+        ? (ms / maxMs).clamp(AppSpacing.zero, AppSpacing.opacityVisible)
+        : AppSpacing.zero;
     final barHeight = ms > 0
         ? (ratio * AppSpacing.statsBarMaxHeight)
             .clamp(AppSpacing.xs, AppSpacing.statsBarMaxHeight)
@@ -213,16 +229,19 @@ class RankedListCard extends StatelessWidget {
     super.key,
     required this.title,
     required this.items,
+    this.effectMode = EffectMode.lean,
   });
 
   final String title;
   final List<RankedMediaStat> items;
+  final EffectMode effectMode;
 
   @override
   Widget build(BuildContext context) {
     final topMs = items.isNotEmpty ? items.first.watchedMs : 0;
 
     return StatsCard(
+      effectMode: effectMode,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -238,11 +257,14 @@ class RankedListCard extends StatelessWidget {
               children: List.generate(items.length, (index) {
                 final item = items[index];
                 final ratio = topMs > 0
-                    ? (item.watchedMs / topMs).clamp(0.0, 1.0)
-                    : 0.0;
+                    ? (item.watchedMs / topMs)
+                        .clamp(AppSpacing.zero, AppSpacing.opacityVisible)
+                    : AppSpacing.zero;
                 return Padding(
                   padding: EdgeInsets.only(
-                    bottom: index < items.length - 1 ? AppSpacing.sm : 0.0,
+                    bottom: index < items.length - 1
+                        ? AppSpacing.sm
+                        : AppSpacing.zero,
                   ),
                   child: _RankedRow(
                     rank: index + 1,

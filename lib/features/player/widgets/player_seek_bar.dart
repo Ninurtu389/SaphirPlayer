@@ -25,6 +25,7 @@ class PlayerSeekBar extends StatefulWidget {
 class _PlayerSeekBarState extends State<PlayerSeekBar> {
   bool _isSeekHovered = false;
   double? _hoverRatio;
+  double? _dragRatio;
 
   @override
   Widget build(BuildContext context) {
@@ -35,12 +36,19 @@ class _PlayerSeekBarState extends State<PlayerSeekBar> {
       builder: (context, progress, _) {
         final durMs = progress.duration.inMilliseconds;
         final posMs = progress.position.inMilliseconds;
-        final sliderValue = durMs > 0 ? (posMs / durMs).clamp(0.0, 1.0) : 0.0;
+        final liveRatio = durMs > 0
+            ? (posMs / durMs).clamp(AppSpacing.zero, AppSpacing.opacityVisible)
+            : AppSpacing.zero;
+        final sliderValue = (_dragRatio ?? liveRatio)
+            .clamp(AppSpacing.zero, AppSpacing.opacityVisible);
+        final displayPosition = (_dragRatio != null && durMs > 0)
+            ? Duration(milliseconds: (durMs * sliderValue).round())
+            : progress.position;
 
         return Row(
           children: [
             Text(
-              Formatters.formatPlayerDuration(progress.position),
+              Formatters.formatPlayerDuration(displayPosition),
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(width: AppSpacing.sm),
@@ -90,6 +98,10 @@ class _PlayerSeekBarState extends State<PlayerSeekBar> {
     final controller = widget.controller;
     final hoverRatio = _hoverRatio;
     final showTooltip = _isSeekHovered && hoverRatio != null && durMs > 0;
+    final inset = AppSpacing.sliderHorizontalTrackInset;
+    final usableWidth = trackWidth > inset * 2
+        ? trackWidth - (inset * 2)
+        : trackWidth;
 
     return MouseRegion(
       onEnter: (_) => setState(() => _isSeekHovered = true),
@@ -98,9 +110,11 @@ class _PlayerSeekBarState extends State<PlayerSeekBar> {
         _hoverRatio = null;
       }),
       onHover: (event) {
-        if (trackWidth <= 0) return;
+        if (usableWidth <= AppSpacing.zero) return;
+        final origin = trackWidth > inset * 2 ? inset : AppSpacing.zero;
         setState(() {
-          _hoverRatio = (event.localPosition.dx / trackWidth).clamp(0.0, 1.0);
+          _hoverRatio = ((event.localPosition.dx - origin) / usableWidth)
+              .clamp(AppSpacing.zero, AppSpacing.opacityVisible);
         });
       },
       child: Stack(
@@ -136,7 +150,12 @@ class _PlayerSeekBarState extends State<PlayerSeekBar> {
             ),
             child: Slider(
               value: sliderValue,
-              onChanged: controller.seekToRatio,
+              onChangeStart: (val) => setState(() => _dragRatio = val),
+              onChanged: (val) => setState(() => _dragRatio = val),
+              onChangeEnd: (val) {
+                setState(() => _dragRatio = null);
+                controller.seekToRatio(val);
+              },
             ),
           ),
           if (showTooltip)
@@ -154,8 +173,13 @@ class _PlayerSeekBarState extends State<PlayerSeekBar> {
   ) {
     final hoverPos = Duration(milliseconds: (durMs * ratio).round());
     final chapter = widget.controller.chapterAtPosition(hoverPos);
-    final rawLeft = (ratio * trackWidth) -
-        (AppSpacing.seekHoverTooltipMaxWidth * AppSpacing.halfFactor);
+    final inset = AppSpacing.sliderHorizontalTrackInset;
+    final hasInset = trackWidth > inset * 2;
+    final trackStart = hasInset ? inset : AppSpacing.zero;
+    final usableWidth = hasInset ? trackWidth - (inset * 2) : trackWidth;
+    final hoverX = trackStart + (ratio * usableWidth);
+    final rawLeft =
+        hoverX - (AppSpacing.seekHoverTooltipMaxWidth * AppSpacing.halfFactor);
     final maxLeft =
         (trackWidth - AppSpacing.seekHoverTooltipMaxWidth).clamp(
       AppSpacing.zero,
@@ -217,17 +241,24 @@ class _SeekMarkersPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (durationMs <= 0 || size.width <= 0) {
+    if (durationMs <= 0 || size.width <= AppSpacing.zero) {
       return;
     }
+    final inset = AppSpacing.sliderHorizontalTrackInset;
+    final hasInset = size.width > inset * 2;
+    final trackStart = hasInset ? inset : AppSpacing.zero;
+    final usableWidth = hasInset ? size.width - (inset * 2) : size.width;
     final centerY = size.height * AppSpacing.halfFactor;
+
     final chapterPaint = Paint()
       ..color = AppColors.chapterMarker
       ..strokeWidth = AppSpacing.chapterMarkerWidth;
 
     for (final chapter in chapters) {
       if (chapter.startMs <= 0) continue;
-      final x = (chapter.startMs / durationMs).clamp(0.0, 1.0) * size.width;
+      final ratio = (chapter.startMs / durationMs)
+          .clamp(AppSpacing.zero, AppSpacing.opacityVisible);
+      final x = trackStart + (ratio * usableWidth);
       final halfH = AppSpacing.chapterMarkerHeight * AppSpacing.halfFactor;
       canvas.drawLine(
         Offset(x, centerY - halfH),
@@ -238,7 +269,9 @@ class _SeekMarkersPainter extends CustomPainter {
 
     final bookmarkPaint = Paint()..color = AppColors.bookmarkMarker;
     for (final bm in bookmarks) {
-      final x = (bm.positionMs / durationMs).clamp(0.0, 1.0) * size.width;
+      final ratio = (bm.positionMs / durationMs)
+          .clamp(AppSpacing.zero, AppSpacing.opacityVisible);
+      final x = trackStart + (ratio * usableWidth);
       canvas.drawCircle(
         Offset(x, centerY),
         AppSpacing.bookmarkMarkerRadius,

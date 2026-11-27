@@ -12,10 +12,12 @@ class PlayerBottomHud extends StatelessWidget {
     super.key,
     required this.controller,
     this.effectMode = EffectMode.glass,
+    this.onReturnFocus,
   });
 
   final SaphirPlayerController controller;
   final EffectMode effectMode;
+  final VoidCallback? onReturnFocus;
 
   @override
   Widget build(BuildContext context) {
@@ -59,6 +61,8 @@ class PlayerBottomHud extends StatelessWidget {
       builder: (context, constraints) {
         final isCompact =
             constraints.maxWidth < AppSpacing.compactPlayerBreakpoint;
+        final useWrapLayout =
+            constraints.maxWidth < AppSpacing.maxSettingsWidth;
         final transportButtons = [
           IconButton(
             tooltip: AppStrings.playerPrevEpisodeTooltip,
@@ -113,7 +117,32 @@ class PlayerBottomHud extends StatelessWidget {
           ),
         );
 
-        if (isCompact) {
+        final volumeSlider = SizedBox(
+          width: AppSpacing.hudSliderWidth,
+          child: SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: AppSpacing.progressBarHeight,
+              activeTrackColor: AppColors.sapphireBright,
+              inactiveTrackColor: AppColors.progressTrack,
+              thumbColor: AppColors.textPrimary,
+              thumbShape: const RoundSliderThumbShape(
+                enabledThumbRadius: AppSpacing.playerSeekThumbRadius,
+              ),
+            ),
+            child: Slider(
+              min: AppSpacing.volumeMin,
+              max: controller.maxVolume,
+              value: controller.volume.clamp(
+                AppSpacing.volumeMin,
+                controller.maxVolume,
+              ),
+              onChanged: (val) =>
+                  controller.adjustVolume(val - controller.volume),
+            ),
+          ),
+        );
+
+        if (useWrapLayout) {
           return Wrap(
             alignment: WrapAlignment.spaceBetween,
             crossAxisAlignment: WrapCrossAlignment.center,
@@ -122,7 +151,12 @@ class PlayerBottomHud extends StatelessWidget {
             children: [
               ...transportButtons,
               muteButton,
-              PlayerTrackMenus(controller: controller, effectMode: effectMode),
+              if (!isCompact) volumeSlider,
+              PlayerTrackMenus(
+                controller: controller,
+                effectMode: effectMode,
+                onReturnFocus: onReturnFocus,
+              ),
             ],
           );
         }
@@ -132,32 +166,13 @@ class PlayerBottomHud extends StatelessWidget {
             ...transportButtons,
             const SizedBox(width: AppSpacing.md),
             muteButton,
-            SizedBox(
-              width: AppSpacing.hudSliderWidth,
-              child: SliderTheme(
-                data: SliderTheme.of(context).copyWith(
-                  trackHeight: AppSpacing.progressBarHeight,
-                  activeTrackColor: AppColors.sapphireBright,
-                  inactiveTrackColor: AppColors.progressTrack,
-                  thumbColor: AppColors.textPrimary,
-                  thumbShape: const RoundSliderThumbShape(
-                    enabledThumbRadius: AppSpacing.playerSeekThumbRadius,
-                  ),
-                ),
-                child: Slider(
-                  min: AppSpacing.volumeMin,
-                  max: controller.maxVolume,
-                  value: controller.volume.clamp(
-                    AppSpacing.volumeMin,
-                    controller.maxVolume,
-                  ),
-                  onChanged: (val) =>
-                      controller.adjustVolume(val - controller.volume),
-                ),
-              ),
-            ),
+            volumeSlider,
             const Spacer(),
-            PlayerTrackMenus(controller: controller, effectMode: effectMode),
+            PlayerTrackMenus(
+              controller: controller,
+              effectMode: effectMode,
+              onReturnFocus: onReturnFocus,
+            ),
           ],
         );
       },

@@ -3,7 +3,6 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_spacing.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../core/services/local_file_service.dart';
-import '../../../core/theme/effect_mode.dart';
 import '../../../core/utils/formatters.dart';
 import '../library_models.dart';
 
@@ -11,13 +10,11 @@ class EpisodeRow extends StatefulWidget {
   const EpisodeRow({
     super.key,
     required this.episode,
-    required this.effectMode,
     required this.onPlay,
     required this.onToggleWatched,
   });
 
   final EpisodeEntry episode;
-  final EffectMode effectMode;
   final VoidCallback onPlay;
   final VoidCallback onToggleWatched;
 
@@ -107,17 +104,14 @@ class _EpisodeThumbnail extends StatelessWidget {
             fit: StackFit.expand,
             children: [
               if (imageProvider != null)
-                Image(image: imageProvider, fit: BoxFit.cover)
+                Image(
+                  image: imageProvider,
+                  fit: BoxFit.cover,
+                  gaplessPlayback: true,
+                  errorBuilder: (_, __, ___) => const _EpisodeThumbFallback(),
+                )
               else
-                Container(
-                  color: AppColors.elevatedSurface,
-                  alignment: Alignment.center,
-                  child: const Icon(
-                    Icons.play_arrow,
-                    color: AppColors.sapphireBright,
-                    size: AppSpacing.iconSizeLg,
-                  ),
-                ),
+                const _EpisodeThumbFallback(),
               if (isHovered)
                 Container(
                   color: AppColors.badgeBackground,
@@ -128,11 +122,12 @@ class _EpisodeThumbnail extends StatelessWidget {
                     size: AppSpacing.iconSizeXl,
                   ),
                 ),
-              if (episode.progressRatio > 0 && !episode.isCompleted)
+              if (episode.progressRatio > AppSpacing.zero &&
+                  !episode.isCompleted)
                 Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
+                  left: AppSpacing.zero,
+                  right: AppSpacing.zero,
+                  bottom: AppSpacing.zero,
                   child: LinearProgressIndicator(
                     value: episode.progressRatio,
                     minHeight: AppSpacing.progressBarHeight,
@@ -145,6 +140,23 @@ class _EpisodeThumbnail extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _EpisodeThumbFallback extends StatelessWidget {
+  const _EpisodeThumbFallback();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: AppColors.elevatedSurface,
+      alignment: Alignment.center,
+      child: const Icon(
+        Icons.play_arrow,
+        color: AppColors.sapphireBright,
+        size: AppSpacing.iconSizeLg,
       ),
     );
   }

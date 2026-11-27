@@ -36,14 +36,10 @@ class LocalFileService {
     if (path == null || path.isEmpty) {
       return null;
     }
-    final file = File(path);
-    if (!file.existsSync()) {
-      return null;
-    }
     return ResizeImage.resizeIfNeeded(
       cacheWidth,
       cacheHeight,
-      FileImage(file),
+      FileImage(File(path)),
     );
   }
 

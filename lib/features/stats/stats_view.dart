@@ -41,6 +41,7 @@ class StatsView extends StatelessWidget {
                   const SizedBox(height: AppSpacing.lg),
                   if (!summary.hasAnyData)
                     StatsCard(
+                      effectMode: effectMode,
                       child: Padding(
                         padding: const EdgeInsets.symmetric(
                           vertical: AppSpacing.lg,
@@ -60,6 +61,7 @@ class StatsView extends StatelessWidget {
                     WeekdayChartCard(
                       weekdayWatchMs: summary.weekdayWatchMs,
                       busiestIndex: summary.busiestWeekdayIndex,
+                      effectMode: effectMode,
                     ),
                     const SizedBox(height: AppSpacing.md),
                     _buildTopLists(summary),
@@ -81,10 +83,12 @@ class StatsView extends StatelessWidget {
         final seriesCard = RankedListCard(
           title: AppStrings.statsTopSeriesTitle,
           items: summary.topSeries,
+          effectMode: effectMode,
         );
         final moviesCard = RankedListCard(
           title: AppStrings.statsTopMoviesTitle,
           items: summary.topMovies,
+          effectMode: effectMode,
         );
         if (isWide) {
           return Row(
@@ -117,10 +121,10 @@ class StatsView extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final columns = constraints.maxWidth >= AppSpacing.maxSettingsWidth
-            ? 4
+            ? AppSpacing.statsKpiColumnsWide
             : (constraints.maxWidth >= AppSpacing.searchBarExpandedWidth
-                ? 2
-                : 1);
+                ? AppSpacing.statsKpiColumnsMedium
+                : AppSpacing.statsKpiColumnsNarrow);
         final cardWidth =
             (constraints.maxWidth - (columns - 1) * AppSpacing.md) / columns;
 
@@ -136,6 +140,7 @@ class StatsView extends StatelessWidget {
                 value: Formatters.formatWatchDuration(summary.totalWatchMs),
                 subtitle:
                     '${AppStrings.statsSeriesWatchtimeLabel}: ${Formatters.formatWatchDuration(summary.seriesWatchMs)} · ${AppStrings.statsMoviesWatchtimeLabel}: ${Formatters.formatWatchDuration(summary.movieWatchMs)}',
+                effectMode: effectMode,
               ),
             ),
             SizedBox(
@@ -149,6 +154,7 @@ class StatsView extends StatelessWidget {
                 subtitle: busiestDay != null
                     ? '${Formatters.formatWatchDuration(busiestDay.watchedMs)} · $busiestWeekdayLabel'
                     : AppStrings.statsNoDataDash,
+                effectMode: effectMode,
               ),
             ),
             SizedBox(
@@ -160,6 +166,7 @@ class StatsView extends StatelessWidget {
                     '${summary.currentStreakDays} ${AppStrings.statsStreakDaysSuffix}',
                 subtitle:
                     '${AppStrings.statsStreakBestPrefix} ${summary.longestStreakDays} ${AppStrings.statsDaysShort}',
+                effectMode: effectMode,
               ),
             ),
             SizedBox(
@@ -171,6 +178,7 @@ class StatsView extends StatelessWidget {
                     '${summary.completedEpisodes}/${summary.totalEpisodes} ${AppStrings.episodesCountLabel}',
                 subtitle:
                     '${summary.completedMovies}/${summary.totalMovies} ${AppStrings.moviesCountLabel}',
+                effectMode: effectMode,
               ),
             ),
           ],

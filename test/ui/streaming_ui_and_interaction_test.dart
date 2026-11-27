@@ -120,7 +120,7 @@ void main() {
 
       expect(find.text('Dark'), findsOneWidget);
       expect(find.text('Interstellar'), findsOneWidget);
-      expect(find.text(AppStrings.libraryOverviewTitle), findsNothing);
+      expect(find.text(AppStrings.libraryOverviewTitle), findsOneWidget);
 
       await tester.tap(find.text(AppStrings.filterMoviesLabel));
       await tester.pumpAndSettle();

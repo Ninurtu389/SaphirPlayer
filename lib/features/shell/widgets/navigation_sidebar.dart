@@ -9,10 +9,16 @@ class NavigationSidebar extends StatelessWidget {
     super.key,
     required this.activeSection,
     required this.onSelectSection,
+    this.isScanning = false,
+    this.isNasOffline = false,
+    this.statusMessage = '',
   });
 
   final AppSection activeSection;
   final ValueChanged<AppSection> onSelectSection;
+  final bool isScanning;
+  final bool isNasOffline;
+  final String statusMessage;
 
   @override
   Widget build(BuildContext context) {
@@ -46,6 +52,37 @@ class NavigationSidebar extends StatelessWidget {
             onTap: () => onSelectSection(AppSection.stats),
           ),
           const Spacer(),
+          if (isScanning || isNasOffline)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+              child: Tooltip(
+                message: statusMessage.isNotEmpty
+                    ? statusMessage
+                    : (isScanning
+                        ? AppStrings.scanningStatus
+                        : AppStrings.nasOfflineStatus),
+                child: Container(
+                  padding: const EdgeInsets.all(AppSpacing.xs),
+                  decoration: BoxDecoration(
+                    color: AppColors.elevatedSurface,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: isScanning
+                          ? AppColors.sapphireBright
+                          : AppColors.warningAmber,
+                      width: AppSpacing.borderWidthThin,
+                    ),
+                  ),
+                  child: Icon(
+                    isScanning ? Icons.sync : Icons.cloud_off_outlined,
+                    size: AppSpacing.iconSizeSm,
+                    color: isScanning
+                        ? AppColors.sapphireBright
+                        : AppColors.warningAmber,
+                  ),
+                ),
+              ),
+            ),
           _NavRailItem(
             icon: Icons.settings_outlined,
             selectedIcon: Icons.settings,

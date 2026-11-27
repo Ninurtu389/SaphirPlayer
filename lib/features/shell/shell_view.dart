@@ -125,7 +125,6 @@ class _ShellViewState extends State<ShellView> {
       listenable: Listenable.merge([
         widget.shellController,
         widget.settingsController,
-        widget.libraryController,
       ]),
       builder: (context, _) {
         final effectMode = widget.settingsController.effectMode;
@@ -154,9 +153,17 @@ class _ShellViewState extends State<ShellView> {
               Expanded(
                 child: Row(
                   children: [
-                    NavigationSidebar(
-                      activeSection: activeSection,
-                      onSelectSection: widget.shellController.selectSection,
+                    ListenableBuilder(
+                      listenable: widget.libraryController,
+                      builder: (context, _) => NavigationSidebar(
+                        activeSection: activeSection,
+                        onSelectSection: widget.shellController.selectSection,
+                        isScanning: widget.libraryController.isScanning,
+                        isNasOffline:
+                            widget.libraryController.statusMessage ==
+                                AppStrings.nasOfflineStatus,
+                        statusMessage: widget.libraryController.statusMessage,
+                      ),
                     ),
                     Expanded(
                       child: _buildSectionContent(activeSection, effectMode),
@@ -175,6 +182,7 @@ class _ShellViewState extends State<ShellView> {
     final seriesDetail = widget.shellController.selectedSeriesDetail;
     if (seriesDetail != null) {
       return SeriesDetailView(
+        key: ValueKey(seriesDetail.seriesId),
         detail: seriesDetail,
         effectMode: effectMode,
         onBack: widget.shellController.closeSeriesDetail,
@@ -194,6 +202,8 @@ class _ShellViewState extends State<ShellView> {
             widget.homeController.buildSessionForCard(item),
           ),
           onOpenSeries: widget.shellController.openSeriesById,
+          onRemoveFromContinueWatching:
+              widget.shellController.handleRemoveFromContinueWatching,
         );
       case AppSection.library:
         return LibraryView(
@@ -210,21 +220,24 @@ class _ShellViewState extends State<ShellView> {
           effectMode: effectMode,
         );
       case AppSection.settings:
-        return SettingsView(
-          settingsController: widget.settingsController,
-          libraryController: widget.libraryController,
-          nasInputController: _nasInputController,
-          effectMode: effectMode,
-          statusMessage: widget.shellController.statusMessage,
-          onAddFolderFromInput: _handleAddFolderFromInput,
-          onAddFolderFromPicker:
-              widget.shellController.handleAddFolderFromPicker,
-          onRemoveFolder: widget.shellController.handleRemoveFolder,
-          onTriggerScan: widget.shellController.triggerScan,
-          onSaveSettings: _handleSaveSettings,
-          onSyncNow: widget.shellController.handleSyncNow,
-          onClearCache: widget.shellController.handleClearCache,
-          onResetDatabase: _confirmResetDatabase,
+        return ListenableBuilder(
+          listenable: widget.libraryController,
+          builder: (context, _) => SettingsView(
+            settingsController: widget.settingsController,
+            libraryController: widget.libraryController,
+            nasInputController: _nasInputController,
+            effectMode: effectMode,
+            statusMessage: widget.shellController.statusMessage,
+            onAddFolderFromInput: _handleAddFolderFromInput,
+            onAddFolderFromPicker:
+                widget.shellController.handleAddFolderFromPicker,
+            onRemoveFolder: widget.shellController.handleRemoveFolder,
+            onTriggerScan: widget.shellController.triggerScan,
+            onSaveSettings: _handleSaveSettings,
+            onSyncNow: widget.shellController.handleSyncNow,
+            onClearCache: widget.shellController.handleClearCache,
+            onResetDatabase: _confirmResetDatabase,
+          ),
         );
     }
   }

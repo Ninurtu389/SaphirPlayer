@@ -24,39 +24,42 @@ class PlayerActionOsd extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    final panel = ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: AppSpacing.osdMaxWidth),
-      child: SurfacePanel(
-        effectMode: effectMode,
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.md,
-          vertical: AppSpacing.xs,
-        ),
-        borderRadius: AppSpacing.radiusSm,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              _iconForKind(kind),
-              size: AppSpacing.iconSizeMd,
-              color: AppColors.sapphireBright,
-            ),
-            const SizedBox(width: AppSpacing.xs),
-            Flexible(
-              child: Text(
-                message ?? '',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: AppColors.textPrimary,
-                      fontWeight: FontWeight.w600,
+    final panel = visible
+        ? ConstrainedBox(
+            key: const ValueKey<bool>(true),
+            constraints: const BoxConstraints(maxWidth: AppSpacing.osdMaxWidth),
+            child: SurfacePanel(
+              effectMode: effectMode,
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: AppSpacing.xs,
+              ),
+              borderRadius: AppSpacing.radiusSm,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    _iconForKind(kind),
+                    size: AppSpacing.iconSizeMd,
+                    color: AppColors.sapphireBright,
+                  ),
+                  const SizedBox(width: AppSpacing.xs),
+                  Flexible(
+                    child: Text(
+                      message ?? '',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: AppColors.textPrimary,
+                            fontWeight: FontWeight.w600,
+                          ),
                     ),
+                  ),
+                ],
               ),
             ),
-          ],
-        ),
-      ),
-    );
+          )
+        : const SizedBox.shrink(key: ValueKey<bool>(false));
 
     return Positioned(
       top: AppSpacing.osdTopOffset,
@@ -66,10 +69,7 @@ class PlayerActionOsd extends StatelessWidget {
         child: Align(
           alignment: Alignment.topCenter,
           child: effectMode == EffectMode.glass
-              ? AnimatedOpacity(
-                  opacity: visible
-                      ? AppSpacing.opacityVisible
-                      : AppSpacing.opacityHidden,
+              ? AnimatedSwitcher(
                   duration: const Duration(
                     milliseconds: AppSpacing.hudFadeAnimationMs,
                   ),

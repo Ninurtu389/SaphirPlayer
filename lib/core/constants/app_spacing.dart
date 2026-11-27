@@ -24,7 +24,6 @@ class AppSpacing {
   static const double windowMaximizeIconSize = 12.0;
   static const double windowRestoreIconSize = 10.0;
   static const double titleBarSearchHeight = 26.0;
-  static const double titleBarSearchHorizontalClearance = 148.0;
   static const double titleBarLogoDotSize = 7.0;
   static const double titleBarSearchFontSize = 13.0;
   static const double navRailWidth = 84.0;
@@ -38,18 +37,19 @@ class AppSpacing {
   static const double heroGlowRadius = 0.9;
   static const double seriesHeaderGlowRadius = 1.0;
 
+  static const int heroCacheWidth = 1280;
+  static const int heroCacheHeight = 720;
   static const double thumbWidth = 320.0;
   static const double thumbHeight = 180.0;
   static const double tileCardWidth = 264.0;
   static const double tileCardHeight = 148.0;
-  static const double tileRailHeight = 164.0;
+  static const double tileRailHeight = 184.0;
+  static const double tileRemoveButtonSize = 26.0;
   static const double libraryGridMaxExtent = 280.0;
-  static const double libraryGridMainAxisExtent = 160.0;
 
   static const double tileHoverScale = 1.04;
   static const double tileRestScale = 1.0;
   static const double tileHoverElevationBlur = 18.0;
-  static const double tileBorderWidthDefault = 1.0;
   static const double tileBorderWidthHover = 1.5;
   static const int hoverAnimationMs = 180;
   static const int hudFadeAnimationMs = 220;
@@ -65,6 +65,9 @@ class AppSpacing {
   static const double statsBarWidth = 28.0;
   static const int statsTopListLimit = 5;
   static const double statsMaxWidth = 1040.0;
+  static const int statsKpiColumnsWide = 4;
+  static const int statsKpiColumnsMedium = 2;
+  static const int statsKpiColumnsNarrow = 1;
 
   static const double seriesDetailHeaderHeight = 280.0;
   static const double episodeThumbWidth = 216.0;
@@ -151,7 +154,9 @@ class AppSpacing {
   static const int sleepTimer60Minutes = 60;
   static const int sleepTimerTickSeconds = 30;
   static const int searchDebounceMs = 180;
-  static const int statusMessageAutoClearSeconds = 4;
+  static const int statusBannerAutoHideSeconds = 4;
+  static const double introDismissIconSize = 16.0;
+  static const double sliderHorizontalTrackInset = 24.0;
 
   static const double miniPlayerWidth = 480.0;
   static const double miniPlayerHeight = 270.0;
@@ -170,7 +175,6 @@ class AppSpacing {
   static const double chapterMarkerWidth = 2.0;
   static const double chapterMarkerHeight = 10.0;
   static const double bookmarkMarkerRadius = 4.5;
-  static const double timeDisplayMinWidth = 88.0;
   static const double compactTopHudBreakpoint = 560.0;
   static const double miniPlayerDragBarHeight = 32.0;
   static const double badgePaddingH = 8.0;
@@ -178,7 +182,6 @@ class AppSpacing {
   static const double borderWidthThin = 1.0;
   static const double opacityVisible = 1.0;
   static const double opacityHidden = 0.0;
-  static const double opacityMuted = 0.7;
   static const double zero = 0.0;
   static const double halfFactor = 0.5;
   static const double drawerMaxWidthFraction = 0.85;

@@ -33,25 +33,40 @@ class LibraryView extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SegmentedButton<LibraryFilter>(
-                segments: const [
-                  ButtonSegment<LibraryFilter>(
-                    value: LibraryFilter.all,
-                    label: Text(AppStrings.filterAllLabel),
-                  ),
-                  ButtonSegment<LibraryFilter>(
-                    value: LibraryFilter.series,
-                    label: Text(AppStrings.filterSeriesLabel),
-                  ),
-                  ButtonSegment<LibraryFilter>(
-                    value: LibraryFilter.movies,
-                    label: Text(AppStrings.filterMoviesLabel),
-                  ),
-                ],
-                selected: {activeFilter},
-                onSelectionChanged: (selection) {
-                  libraryController.setFilter(selection.first);
-                },
+              SizedBox(
+                width: double.infinity,
+                child: Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: AppSpacing.md,
+                  runSpacing: AppSpacing.sm,
+                  children: [
+                    Text(
+                      AppStrings.libraryOverviewTitle,
+                      style: Theme.of(context).textTheme.headlineMedium,
+                    ),
+                    SegmentedButton<LibraryFilter>(
+                      segments: const [
+                        ButtonSegment<LibraryFilter>(
+                          value: LibraryFilter.all,
+                          label: Text(AppStrings.filterAllLabel),
+                        ),
+                        ButtonSegment<LibraryFilter>(
+                          value: LibraryFilter.series,
+                          label: Text(AppStrings.filterSeriesLabel),
+                        ),
+                        ButtonSegment<LibraryFilter>(
+                          value: LibraryFilter.movies,
+                          label: Text(AppStrings.filterMoviesLabel),
+                        ),
+                      ],
+                      selected: {activeFilter},
+                      onSelectionChanged: (selection) {
+                        libraryController.setFilter(selection.first);
+                      },
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: AppSpacing.md),
               Expanded(
@@ -67,7 +82,8 @@ class LibraryView extends StatelessWidget {
                         gridDelegate:
                             const SliverGridDelegateWithMaxCrossAxisExtent(
                           maxCrossAxisExtent: AppSpacing.libraryGridMaxExtent,
-                          mainAxisExtent: AppSpacing.libraryGridMainAxisExtent,
+                          childAspectRatio:
+                              AppSpacing.thumbWidth / AppSpacing.thumbHeight,
                           mainAxisSpacing: AppSpacing.md,
                           crossAxisSpacing: AppSpacing.md,
                         ),

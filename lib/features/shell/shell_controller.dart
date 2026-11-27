@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
-import 'package:window_manager/window_manager.dart';
 import '../../core/constants/app_spacing.dart';
 import '../../core/constants/app_strings.dart';
 import '../../core/controllers/library_controller.dart';
@@ -20,7 +19,7 @@ enum AppSection {
   settings,
 }
 
-class ShellController extends ChangeNotifier with WindowListener {
+class ShellController extends ChangeNotifier {
   ShellController({
     SettingsController? settingsController,
     LibraryController? libraryController,
@@ -49,7 +48,7 @@ class ShellController extends ChangeNotifier with WindowListener {
   String? _statusMessage;
   Timer? _searchDebounceTimer;
   Timer? _statusClearTimer;
-  bool _isListenerAttached = false;
+  Object? _windowListenerToken;
   bool _isClosing = false;
   bool _isDisposed = false;
 
@@ -77,18 +76,20 @@ class ShellController extends ChangeNotifier with WindowListener {
   }
 
   void attachWindowListener() {
-    if (_isListenerAttached) return;
-    _isListenerAttached = true;
-    DesktopPlatformService.addWindowListener(this);
+    if (_windowListenerToken != null) return;
+    _windowListenerToken = DesktopPlatformService.registerWindowCallbacks(
+      onMaximize: onWindowMaximize,
+      onUnmaximize: onWindowUnmaximize,
+      onClose: onWindowClose,
+    );
   }
 
   void detachWindowListener() {
-    if (!_isListenerAttached) return;
-    _isListenerAttached = false;
-    DesktopPlatformService.removeWindowListener(this);
+    if (_windowListenerToken == null) return;
+    DesktopPlatformService.unregisterWindowCallbacks(_windowListenerToken);
+    _windowListenerToken = null;
   }
 
-  @override
   void onWindowMaximize() {
     if (!_isMaximized) {
       _isMaximized = true;
@@ -96,7 +97,6 @@ class ShellController extends ChangeNotifier with WindowListener {
     }
   }
 
-  @override
   void onWindowUnmaximize() {
     if (_isMaximized) {
       _isMaximized = false;
@@ -104,7 +104,6 @@ class ShellController extends ChangeNotifier with WindowListener {
     }
   }
 
-  @override
   Future<void> onWindowClose() async {
     if (_isClosing) return;
     _isClosing = true;
@@ -157,7 +156,7 @@ class ShellController extends ChangeNotifier with WindowListener {
     _statusMessage = message;
     _safeNotify();
     _statusClearTimer = Timer(
-      const Duration(seconds: AppSpacing.statusMessageAutoClearSeconds),
+      const Duration(seconds: AppSpacing.statusBannerAutoHideSeconds),
       () {
         if (_isDisposed) return;
         _statusMessage = null;

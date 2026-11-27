@@ -35,15 +35,24 @@ class DesktopPlatformService {
     return (path == null || path.isEmpty) ? null : path;
   }
 
-  static void addWindowListener(WindowListener listener) {
-    if (_isDesktop) {
-      windowManager.addListener(listener);
-    }
+  static Object? registerWindowCallbacks({
+    required VoidCallback onMaximize,
+    required VoidCallback onUnmaximize,
+    required Future<void> Function() onClose,
+  }) {
+    if (!_isDesktop) return null;
+    final listener = _PlatformWindowListener(
+      onMaximize: onMaximize,
+      onUnmaximize: onUnmaximize,
+      onClose: onClose,
+    );
+    windowManager.addListener(listener);
+    return listener;
   }
 
-  static void removeWindowListener(WindowListener listener) {
-    if (_isDesktop) {
-      windowManager.removeListener(listener);
+  static void unregisterWindowCallbacks(Object? token) {
+    if (_isDesktop && token is WindowListener) {
+      windowManager.removeListener(token);
     }
   }
 
@@ -121,5 +130,28 @@ class DesktopPlatformService {
     if (_isDesktop) {
       await windowManager.setMinimumSize(size);
     }
+  }
+}
+
+class _PlatformWindowListener with WindowListener {
+  _PlatformWindowListener({
+    required this.onMaximize,
+    required this.onUnmaximize,
+    required this.onClose,
+  });
+
+  final VoidCallback onMaximize;
+  final VoidCallback onUnmaximize;
+  final Future<void> Function() onClose;
+
+  @override
+  void onWindowMaximize() => onMaximize();
+
+  @override
+  void onWindowUnmaximize() => onUnmaximize();
+
+  @override
+  void onWindowClose() {
+    onClose();
   }
 }

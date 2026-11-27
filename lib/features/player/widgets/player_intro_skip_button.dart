@@ -13,6 +13,7 @@ class PlayerIntroSkipButton extends StatelessWidget {
     required this.selectedSeconds,
     required this.onSkipIntro,
     required this.onSelectSeconds,
+    required this.onDismiss,
   });
 
   final EffectMode effectMode;
@@ -20,6 +21,7 @@ class PlayerIntroSkipButton extends StatelessWidget {
   final int selectedSeconds;
   final VoidCallback onSkipIntro;
   final ValueChanged<int> onSelectSeconds;
+  final VoidCallback onDismiss;
 
   @override
   Widget build(BuildContext context) {
@@ -67,6 +69,19 @@ class PlayerIntroSkipButton extends StatelessWidget {
                     ),
                   )
                   .toList(),
+            ),
+            IconButton(
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints.tightFor(
+                width: AppSpacing.tileRemoveButtonSize,
+                height: AppSpacing.tileRemoveButtonSize,
+              ),
+              tooltip: AppStrings.dismissIntroSkipTooltip,
+              onPressed: onDismiss,
+              icon: const Icon(
+                Icons.close,
+                size: AppSpacing.introDismissIconSize,
+              ),
             ),
           ],
         ),

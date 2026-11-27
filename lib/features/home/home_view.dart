@@ -16,12 +16,14 @@ class HomeView extends StatelessWidget {
     required this.effectMode,
     required this.onSelectItem,
     required this.onOpenSeries,
+    this.onRemoveFromContinueWatching,
   });
 
   final HomeController homeController;
   final EffectMode effectMode;
   final ValueChanged<MediaCardItem> onSelectItem;
   final ValueChanged<int> onOpenSeries;
+  final ValueChanged<MediaCardItem>? onRemoveFromContinueWatching;
 
   @override
   Widget build(BuildContext context) {
@@ -69,6 +71,7 @@ class HomeView extends StatelessWidget {
               effectMode: effectMode,
               onSelectItem: onSelectItem,
               onOpenSeries: onOpenSeries,
+              onRemoveItem: onRemoveFromContinueWatching,
             ),
             MediaRail(
               title: AppStrings.recentlyAddedTitle,
@@ -122,7 +125,11 @@ class _HeroBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final imageProvider = LocalFileService.imageProviderForPath(hero.imagePath);
+    final imageProvider = LocalFileService.imageProviderForPath(
+      hero.imagePath,
+      cacheWidth: AppSpacing.heroCacheWidth,
+      cacheHeight: AppSpacing.heroCacheHeight,
+    );
     final isGlass = effectMode == EffectMode.glass;
 
     return SizedBox(
@@ -132,7 +139,12 @@ class _HeroBanner extends StatelessWidget {
         fit: StackFit.expand,
         children: [
           if (imageProvider != null)
-            Image(image: imageProvider, fit: BoxFit.cover)
+            Image(
+              image: imageProvider,
+              fit: BoxFit.cover,
+              gaplessPlayback: true,
+              errorBuilder: (_, __, ___) => _HeroFallbackBackdrop(hero: hero),
+            )
           else
             _HeroFallbackBackdrop(hero: hero),
           if (isGlass)
@@ -222,6 +234,7 @@ class _HeroOverlayContent extends StatelessWidget {
     final infoText = Formatters.formatHeroInfoLine(
       hero.subtitle,
       hero.remainingMinutes,
+      artist: hero.artist,
     );
 
     return Padding(

@@ -92,10 +92,18 @@ class SettingsMediaCard extends StatelessWidget {
     final field = TextField(
       controller: nasInputController,
       onSubmitted: (_) => onAddFolderFromInput(),
-      decoration: const InputDecoration(
+      decoration: InputDecoration(
         labelText: AppStrings.nasPathLabel,
         hintText: AppStrings.nasPathHint,
         isDense: true,
+        suffixIcon: IconButton(
+          tooltip: AppStrings.settingsAddManualFolderTooltip,
+          onPressed: onAddFolderFromInput,
+          icon: const Icon(
+            Icons.add_circle_outline,
+            size: AppSpacing.iconSizeMd,
+          ),
+        ),
       ),
     );
     final addBtn = OutlinedButton.icon(

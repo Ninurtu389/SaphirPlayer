@@ -108,13 +108,8 @@ class EpisodeEntry {
     return ratio.clamp(0.0, 1.0);
   }
 
-  String get formattedDuration {
-    if (durationMs <= 0) {
-      return '';
-    }
-    final minutes = (durationMs / 60000).round();
-    return '$minutes Min.';
-  }
+  String get formattedDuration =>
+      Formatters.formatEpisodeDurationMinutes(durationMs);
 }
 
 class SeriesDetailData {

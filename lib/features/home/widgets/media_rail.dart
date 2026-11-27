@@ -14,6 +14,7 @@ class MediaRail extends StatefulWidget {
     required this.effectMode,
     required this.onSelectItem,
     required this.onOpenSeries,
+    this.onRemoveItem,
   });
 
   final String title;
@@ -21,6 +22,7 @@ class MediaRail extends StatefulWidget {
   final EffectMode effectMode;
   final ValueChanged<MediaCardItem> onSelectItem;
   final ValueChanged<int> onOpenSeries;
+  final ValueChanged<MediaCardItem>? onRemoveItem;
 
   @override
   State<MediaRail> createState() => _MediaRailState();
@@ -79,7 +81,8 @@ class _MediaRailState extends State<MediaRail> {
       return;
     }
     final maxExtent = _scrollController.position.maxScrollExtent;
-    final target = (_scrollController.offset + delta).clamp(0.0, maxExtent);
+    final target =
+        (_scrollController.offset + delta).clamp(AppSpacing.zero, maxExtent);
     if (widget.effectMode == EffectMode.glass) {
       _scrollController.animateTo(
         target,
@@ -126,7 +129,7 @@ class _MediaRailState extends State<MediaRail> {
                       controller: _scrollController,
                       padding: const EdgeInsets.symmetric(
                         horizontal: AppSpacing.lg,
-                        vertical: AppSpacing.xs,
+                        vertical: AppSpacing.md,
                       ),
                       scrollDirection: Axis.horizontal,
                       itemCount: widget.items.length,
@@ -139,8 +142,8 @@ class _MediaRailState extends State<MediaRail> {
                   if (_isHovered && _canScrollLeft)
                     Positioned(
                       left: AppSpacing.sm,
-                      top: 0,
-                      bottom: 0,
+                      top: AppSpacing.zero,
+                      bottom: AppSpacing.zero,
                       child: Center(
                         child: _RailArrowButton(
                           icon: Icons.chevron_left,
@@ -153,8 +156,8 @@ class _MediaRailState extends State<MediaRail> {
                   if (_isHovered && _canScrollRight)
                     Positioned(
                       right: AppSpacing.sm,
-                      top: 0,
-                      bottom: 0,
+                      top: AppSpacing.zero,
+                      bottom: AppSpacing.zero,
                       child: Center(
                         child: _RailArrowButton(
                           icon: Icons.chevron_right,
@@ -176,6 +179,8 @@ class _MediaRailState extends State<MediaRail> {
     return MediaTile(
       item: item,
       effectMode: widget.effectMode,
+      onRemove:
+          widget.onRemoveItem != null ? () => widget.onRemoveItem!(item) : null,
       onTap: () {
         if (item.mediaType == 'series' && item.seriesId != null) {
           widget.onOpenSeries(item.seriesId!);

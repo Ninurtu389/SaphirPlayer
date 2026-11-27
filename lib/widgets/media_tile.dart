@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 import '../core/constants/app_colors.dart';
 import '../core/constants/app_spacing.dart';
+import '../core/constants/app_strings.dart';
 import '../core/services/local_file_service.dart';
 import '../core/theme/effect_mode.dart';
 import '../core/utils/formatters.dart';
@@ -12,6 +13,7 @@ class MediaTile extends StatefulWidget {
     required this.item,
     required this.effectMode,
     required this.onTap,
+    this.onRemove,
     this.width = AppSpacing.tileCardWidth,
     this.height = AppSpacing.tileCardHeight,
   });
@@ -19,6 +21,7 @@ class MediaTile extends StatefulWidget {
   final MediaCardItem item;
   final EffectMode effectMode;
   final VoidCallback onTap;
+  final VoidCallback? onRemove;
   final double width;
   final double height;
 
@@ -36,6 +39,8 @@ class _MediaTileState extends State<MediaTile> {
   Widget build(BuildContext context) {
     final isGlass = widget.effectMode == EffectMode.glass;
     final radius = BorderRadius.circular(AppSpacing.radiusMd);
+    final activeBorderColor =
+        isGlass ? AppColors.sapphireHoverBorder : AppColors.sapphireBright;
 
     final tileBody = Container(
       decoration: BoxDecoration(
@@ -43,16 +48,6 @@ class _MediaTileState extends State<MediaTile> {
             ? AppColors.surfaceHover
             : AppColors.anthraciteSurface,
         borderRadius: radius,
-        border: Border.all(
-          color: _isActive
-              ? (isGlass
-                  ? AppColors.sapphireHoverBorder
-                  : AppColors.sapphireBright)
-              : AppColors.borderTransparent,
-          width: _isActive
-              ? AppSpacing.tileBorderWidthHover
-              : AppSpacing.tileBorderWidthDefault,
-        ),
         boxShadow: (isGlass && _isActive)
             ? const [
                 BoxShadow(
@@ -62,15 +57,34 @@ class _MediaTileState extends State<MediaTile> {
               ]
             : const <BoxShadow>[],
       ),
+      foregroundDecoration: BoxDecoration(
+        borderRadius: radius,
+        border: Border.all(
+          color: _isActive ? activeBorderColor : AppColors.borderTransparent,
+          width: AppSpacing.tileBorderWidthHover,
+        ),
+      ),
       child: ClipRRect(
         borderRadius: radius,
-        child: Material(
-          color: AppColors.borderTransparent,
-          child: InkWell(
-            onTap: widget.onTap,
-            onFocusChange: (focused) => setState(() => _isFocused = focused),
-            child: _TileContent(item: widget.item, isActive: _isActive),
-          ),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Material(
+              color: AppColors.borderTransparent,
+              child: InkWell(
+                onTap: widget.onTap,
+                onFocusChange: (focused) =>
+                    setState(() => _isFocused = focused),
+                child: _TileContent(item: widget.item, isActive: _isActive),
+              ),
+            ),
+            if (widget.onRemove != null && _isActive)
+              Positioned(
+                top: AppSpacing.xs,
+                right: AppSpacing.xs,
+                child: _RemoveTileButton(onRemove: widget.onRemove!),
+              ),
+          ],
         ),
       ),
     );
@@ -100,6 +114,39 @@ class _MediaTileState extends State<MediaTile> {
   }
 }
 
+class _RemoveTileButton extends StatelessWidget {
+  const _RemoveTileButton({required this.onRemove});
+
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: AppSpacing.tileRemoveButtonSize,
+      height: AppSpacing.tileRemoveButtonSize,
+      child: Material(
+        color: AppColors.badgeBackground,
+        shape: const CircleBorder(
+          side: BorderSide(
+            color: AppColors.sapphireBright,
+            width: AppSpacing.borderWidthThin,
+          ),
+        ),
+        child: IconButton(
+          padding: EdgeInsets.zero,
+          tooltip: AppStrings.removeFromContinueWatchingTooltip,
+          onPressed: onRemove,
+          icon: const Icon(
+            Icons.close,
+            size: AppSpacing.introDismissIconSize,
+            color: AppColors.textPrimary,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _TileContent extends StatelessWidget {
   const _TileContent({
     required this.item,
@@ -121,74 +168,33 @@ class _TileContent extends StatelessWidget {
       fit: StackFit.expand,
       children: [
         if (imageProvider != null)
-          Image(image: imageProvider, fit: BoxFit.cover)
+          Image(
+            image: imageProvider,
+            fit: BoxFit.cover,
+            gaplessPlayback: true,
+            errorBuilder: (_, __, ___) =>
+                _CoverFallback(title: item.title, monogram: item.monogram),
+          )
         else
           _CoverFallback(title: item.title, monogram: item.monogram),
         const DecoratedBox(
           decoration: BoxDecoration(gradient: AppColors.cardOverlayGradient),
         ),
-        if (isActive)
-          Center(
-            child: Container(
-              padding: const EdgeInsets.all(AppSpacing.xs),
-              decoration: const BoxDecoration(
-                color: AppColors.badgeBackground,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.play_arrow,
-                color: AppColors.textPrimary,
-                size: AppSpacing.iconSizeLg,
-              ),
-            ),
-          ),
-        if (item.isCompleted)
-          Positioned(
-            top: AppSpacing.xs,
-            right: AppSpacing.xs,
-            child: Container(
-              padding: const EdgeInsets.all(AppSpacing.xxs),
-              decoration: const BoxDecoration(
-                color: AppColors.badgeBackground,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.check_circle,
-                color: AppColors.successGreen,
-                size: AppSpacing.iconSizeSm,
-              ),
-            ),
-          ),
+        if (isActive) _buildActiveIcon(),
+        if (item.isCompleted) _buildCompletedBadge(),
         if (item.remainingMinutes > 0 && !item.isCompleted)
-          Positioned(
-            top: AppSpacing.xs,
-            left: AppSpacing.xs,
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.xs,
-                vertical: AppSpacing.xxs,
-              ),
-              decoration: BoxDecoration(
-                color: AppColors.badgeBackground,
-                borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-              ),
-              child: Text(
-                Formatters.formatRemainingMinutes(item.remainingMinutes),
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ),
-          ),
+          _buildRemainingBadge(context),
         Positioned(
           left: AppSpacing.sm,
           right: AppSpacing.sm,
           bottom: AppSpacing.sm,
           child: _TileMetadataOverlay(item: item),
         ),
-        if (item.progressRatio > 0 && !item.isCompleted)
+        if (item.progressRatio > AppSpacing.zero && !item.isCompleted)
           Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
+            left: AppSpacing.zero,
+            right: AppSpacing.zero,
+            bottom: AppSpacing.zero,
             child: LinearProgressIndicator(
               value: item.progressRatio,
               minHeight: AppSpacing.progressBarHeight,
@@ -201,6 +207,69 @@ class _TileContent extends StatelessWidget {
       ],
     );
   }
+
+  Widget _buildActiveIcon() {
+    final isSeries = item.mediaType == 'series';
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: isSeries ? AppSpacing.lg : AppSpacing.zero,
+      ),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.all(AppSpacing.xs),
+          decoration: const BoxDecoration(
+            color: AppColors.badgeBackground,
+            shape: BoxShape.circle,
+          ),
+          child: Icon(
+            isSeries ? Icons.view_list_rounded : Icons.play_arrow,
+            color: AppColors.textPrimary,
+            size: AppSpacing.iconSizeLg,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCompletedBadge() {
+    return Positioned(
+      top: AppSpacing.xs,
+      right: AppSpacing.xs,
+      child: Container(
+        padding: const EdgeInsets.all(AppSpacing.xxs),
+        decoration: const BoxDecoration(
+          color: AppColors.badgeBackground,
+          shape: BoxShape.circle,
+        ),
+        child: const Icon(
+          Icons.check_circle,
+          color: AppColors.successGreen,
+          size: AppSpacing.iconSizeSm,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRemainingBadge(BuildContext context) {
+    return Positioned(
+      top: AppSpacing.xs,
+      left: AppSpacing.xs,
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.xs,
+          vertical: AppSpacing.xxs,
+        ),
+        decoration: BoxDecoration(
+          color: AppColors.badgeBackground,
+          borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+        ),
+        child: Text(
+          Formatters.formatRemainingMinutes(item.remainingMinutes),
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      ),
+    );
+  }
 }
 
 class _TileMetadataOverlay extends StatelessWidget {
@@ -210,6 +279,8 @@ class _TileMetadataOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final subtitleText =
+        Formatters.formatMediaTileSubtitle(item.subtitle, item.artist);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -220,10 +291,10 @@ class _TileMetadataOverlay extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
           style: Theme.of(context).textTheme.titleMedium,
         ),
-        if (item.subtitle.isNotEmpty) ...[
+        if (subtitleText.isNotEmpty) ...[
           const SizedBox(height: AppSpacing.xxs),
           Text(
-            item.subtitle,
+            subtitleText,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: Theme.of(context).textTheme.bodySmall,

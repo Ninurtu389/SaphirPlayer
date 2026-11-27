@@ -15,6 +15,7 @@ class AppStrings {
   static const String nasPathLabel = 'NAS-Quellpfad';
   static const String nasPathHint = r'\\NAS\Serien oder D:\Filme';
   static const String addFolderButton = 'Ordner hinzufügen';
+  static const String settingsAddManualFolderTooltip = 'Pfad übernehmen';
   static const String removeFolderTooltip = 'Ordner entfernen';
   static const String noFoldersConfigured =
       'Noch kein Quellordner hinterlegt. Füge mindestens einen Ordner hinzu.';
@@ -66,6 +67,8 @@ class AppStrings {
   static const String episodesCountLabel = 'Episoden';
 
   static const String continueWatchingTitle = 'Weiterschauen';
+  static const String removeFromContinueWatchingTooltip =
+      'Aus „Weiterschauen“ entfernen';
   static const String rediscoverTitle = 'Schon lange nicht mehr gesehen';
   static const String recentlyAddedTitle = 'Zuletzt hinzugefügt';
   static const String randomPickShortButton = 'Zufälliger Vorschlag';
@@ -118,7 +121,6 @@ class AppStrings {
       'Keine passenden Serien oder Filme gefunden.';
   static const String seriesTypeBadge = 'Serie';
   static const String movieTypeBadge = 'Film';
-  static const String artistLabel = 'Interpret';
   static const String metadataSeparator = ' · ';
   static const String playNowButton = 'Abspielen';
 
@@ -228,11 +230,16 @@ class AppStrings {
   static const String aspect21x9Label = '21:9';
 
   static const String playerChapterPrefix = 'Kapitel';
+  static const String playerChapterPrevTooltip =
+      'Vorheriges Kapitel (Bild ab)';
+  static const String playerChapterNextTooltip = 'Nächstes Kapitel (Bild auf)';
   static const String playerIntroSkipButton = 'Intro überspringen';
+  static const String dismissIntroSkipTooltip = 'Ausblenden';
   static const String playerIntroSkipSettingsTooltip =
       'Intro-Dauer für Serie festlegen';
   static const String playerIntroSkipSecondsSuffix = 'Sek.';
   static const String playerBookmarkTooltip = 'Lesezeichen setzen (B)';
+  static const String playerBookmarksTooltip = 'Lesezeichen';
   static const String playerBookmarkAddedOsd = 'Lesezeichen gespeichert';
   static const String playerBookmarkDeletedOsd = 'Lesezeichen entfernt';
   static const String playerBookmarkListTitle = 'Szenen-Lesezeichen';
@@ -288,6 +295,7 @@ class AppStrings {
     ('F / Doppelklick', 'Vollbild umschalten'),
     ('M', 'Stummschalten'),
     ('N / P / X-Tasten', 'Nächste / Vorherige Folge'),
+    ('Bild auf / Bild ab', 'Nächstes / Vorheriges Kapitel'),
     ('. / ,', 'Einzelbild vorwärts / rückwärts'),
     ('A', 'Seitenverhältnis / Zoom'),
     ('B', 'Lesezeichen setzen'),
