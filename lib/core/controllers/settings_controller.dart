@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import '../constants/app_spacing.dart';
+import '../constants/app_strings.dart';
 import '../services/desktop_platform_service.dart';
 import '../storage/database_service.dart';
 import '../storage/portable_paths.dart';
@@ -20,6 +22,12 @@ class SettingsController extends ChangeNotifier {
   static const String _nasPathKey = 'nas_root_path';
   static const String _nasPathsKey = 'nas_root_paths';
   static const String _globalEffectKey = 'effect_mode_global';
+  static const String _subtitlesDefaultKey = 'subtitles_default_enabled';
+  static const String _preferredSubtitleLangKey =
+      'preferred_subtitle_language';
+  static const String _subtitleScaleKey = 'subtitle_scale';
+  static const String _subtitlePositionKey = 'subtitle_position';
+  static const String _subtitleBgOpacityKey = 'subtitle_bg_opacity';
 
   bool _isDisposed = false;
   List<String> _nasPaths = [];
@@ -27,6 +35,12 @@ class SettingsController extends ChangeNotifier {
   EffectMode _effectMode = EffectMode.glass;
   bool _perDeviceEffect = true;
   int _cacheBytes = 0;
+  bool _subtitlesEnabledByDefault = false;
+  String _preferredSubtitleLanguage = AppStrings.subtitleLangCodeDe;
+  double _subtitleScale = AppSpacing.subtitleScaleDefault;
+  int _subtitlePosition = AppSpacing.subtitlePositionDefault;
+  double _subtitleBgOpacity = AppSpacing.subtitleBgOpacityDefault;
+  bool _hardwareAccelerationEnabled = true;
 
   List<String> get nasPaths => List.unmodifiable(_nasPaths);
   String get nasPath => _nasPaths.isNotEmpty ? _nasPaths.first : '';
@@ -35,9 +49,17 @@ class SettingsController extends ChangeNotifier {
   bool get perDeviceEffect => _perDeviceEffect;
   int get cacheBytes => _cacheBytes;
   String get formattedCacheSize => Formatters.formatCacheSize(_cacheBytes);
+  bool get subtitlesEnabledByDefault => _subtitlesEnabledByDefault;
+  String get preferredSubtitleLanguage => _preferredSubtitleLanguage;
+  double get subtitleScale => _subtitleScale;
+  int get subtitlePosition => _subtitlePosition;
+  double get subtitleBgOpacity => _subtitleBgOpacity;
+  bool get hardwareAccelerationEnabled => _hardwareAccelerationEnabled;
 
   String get _deviceEffectKey =>
       'effect_mode_${DesktopPlatformService.localHostname}';
+  String get _deviceHwdecKey =>
+      'hwdec_${DesktopPlatformService.localHostname}';
 
   Future<void> syncProgress() async {
     await _syncService.syncWithRoots(_nasPaths);
@@ -111,7 +133,46 @@ class SettingsController extends ChangeNotifier {
       );
     }
 
+    _subtitlesEnabledByDefault = _readSetting(db, _subtitlesDefaultKey) == '1';
+    final lang = _readSetting(db, _preferredSubtitleLangKey);
+    _preferredSubtitleLanguage = _normalizeSubtitleLang(lang);
+    _subtitleScale = (double.tryParse(_readSetting(db, _subtitleScaleKey) ?? '') ??
+            AppSpacing.subtitleScaleDefault)
+        .clamp(AppSpacing.subtitleScaleMin, AppSpacing.subtitleScaleMax);
+    _subtitlePosition =
+        (int.tryParse(_readSetting(db, _subtitlePositionKey) ?? '') ??
+                AppSpacing.subtitlePositionDefault)
+            .clamp(
+      AppSpacing.subtitlePositionMin,
+      AppSpacing.subtitlePositionMax,
+    );
+    _subtitleBgOpacity =
+        (double.tryParse(_readSetting(db, _subtitleBgOpacityKey) ?? '') ??
+                AppSpacing.subtitleBgOpacityDefault)
+            .clamp(
+      AppSpacing.subtitleBgOpacityMin,
+      AppSpacing.subtitleBgOpacityMax,
+    );
+    final hwdecRaw = _readSetting(db, _deviceHwdecKey);
+    _hardwareAccelerationEnabled = hwdecRaw == null ? true : hwdecRaw == '1';
+
     _safeNotify();
+  }
+
+  String? _readSetting(dynamic db, String key) {
+    final rows = db.select(
+      'SELECT value FROM app_settings WHERE key = ? LIMIT 1;',
+      [key],
+    );
+    return rows.isNotEmpty ? rows.first['value'] as String : null;
+  }
+
+  static String _normalizeSubtitleLang(String? raw) {
+    if (raw == AppStrings.subtitleLangCodeEn ||
+        raw == AppStrings.subtitleLangCodeAuto) {
+      return raw!;
+    }
+    return AppStrings.subtitleLangCodeDe;
   }
 
   Future<void> refreshCacheSize() async {
@@ -210,44 +271,92 @@ class SettingsController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void updateSubtitlesDefaultEnabled(bool enabled) {
+    _subtitlesEnabledByDefault = enabled;
+    _upsertSetting(_subtitlesDefaultKey, enabled ? '1' : '0');
+    notifyListeners();
+  }
+
+  void updatePreferredSubtitleLanguage(String language) {
+    _preferredSubtitleLanguage = _normalizeSubtitleLang(language);
+    _upsertSetting(_preferredSubtitleLangKey, _preferredSubtitleLanguage);
+    notifyListeners();
+  }
+
+  void updateSubtitleStyle({
+    double? scale,
+    int? position,
+    double? bgOpacity,
+  }) {
+    if (scale != null) {
+      _subtitleScale = scale.clamp(
+        AppSpacing.subtitleScaleMin,
+        AppSpacing.subtitleScaleMax,
+      );
+      _upsertSetting(_subtitleScaleKey, _subtitleScale.toStringAsFixed(2));
+    }
+    if (position != null) {
+      _subtitlePosition = position.clamp(
+        AppSpacing.subtitlePositionMin,
+        AppSpacing.subtitlePositionMax,
+      );
+      _upsertSetting(_subtitlePositionKey, _subtitlePosition.toString());
+    }
+    if (bgOpacity != null) {
+      _subtitleBgOpacity = bgOpacity.clamp(
+        AppSpacing.subtitleBgOpacityMin,
+        AppSpacing.subtitleBgOpacityMax,
+      );
+      _upsertSetting(
+        _subtitleBgOpacityKey,
+        _subtitleBgOpacity.toStringAsFixed(2),
+      );
+    }
+    notifyListeners();
+  }
+
+  void updateHardwareAcceleration(bool enabled) {
+    _hardwareAccelerationEnabled = enabled;
+    _upsertSetting(_deviceHwdecKey, enabled ? '1' : '0');
+    notifyListeners();
+  }
+
+  void _upsertSetting(String key, String value) {
+    _databaseService.instance.execute(
+      '''
+      INSERT INTO app_settings (key, value) VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+      ''',
+      [key, value],
+    );
+  }
+
   void save() {
-    final db = _databaseService.instance;
-    db.execute(
-      '''
-      INSERT INTO app_settings (key, value) VALUES (?, ?)
-      ON CONFLICT(key) DO UPDATE SET value = excluded.value;
-      ''',
-      [_nasPathsKey, jsonEncode(_nasPaths)],
-    );
-    db.execute(
-      '''
-      INSERT INTO app_settings (key, value) VALUES (?, ?)
-      ON CONFLICT(key) DO UPDATE SET value = excluded.value;
-      ''',
-      [_nasPathKey, nasPath],
-    );
+    _upsertSetting(_nasPathsKey, jsonEncode(_nasPaths));
+    _upsertSetting(_nasPathKey, nasPath);
 
     if (_perDeviceEffect) {
-      db.execute(
-        '''
-        INSERT INTO app_settings (key, value) VALUES (?, ?)
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value;
-        ''',
-        [_deviceEffectKey, _effectMode.toStorage()],
-      );
+      _upsertSetting(_deviceEffectKey, _effectMode.toStorage());
     } else {
-      db.execute(
+      _databaseService.instance.execute(
         'DELETE FROM app_settings WHERE key = ?;',
         [_deviceEffectKey],
       );
-      db.execute(
-        '''
-        INSERT INTO app_settings (key, value) VALUES (?, ?)
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value;
-        ''',
-        [_globalEffectKey, _effectMode.toStorage()],
-      );
+      _upsertSetting(_globalEffectKey, _effectMode.toStorage());
     }
+
+    _upsertSetting(
+      _subtitlesDefaultKey,
+      _subtitlesEnabledByDefault ? '1' : '0',
+    );
+    _upsertSetting(_preferredSubtitleLangKey, _preferredSubtitleLanguage);
+    _upsertSetting(_subtitleScaleKey, _subtitleScale.toStringAsFixed(2));
+    _upsertSetting(_subtitlePositionKey, _subtitlePosition.toString());
+    _upsertSetting(
+      _subtitleBgOpacityKey,
+      _subtitleBgOpacity.toStringAsFixed(2),
+    );
+    _upsertSetting(_deviceHwdecKey, _hardwareAccelerationEnabled ? '1' : '0');
 
     notifyListeners();
   }
@@ -257,6 +366,12 @@ class SettingsController extends ChangeNotifier {
     _nasPaths = [];
     _effectMode = EffectMode.glass;
     _perDeviceEffect = true;
+    _subtitlesEnabledByDefault = false;
+    _preferredSubtitleLanguage = AppStrings.subtitleLangCodeDe;
+    _subtitleScale = AppSpacing.subtitleScaleDefault;
+    _subtitlePosition = AppSpacing.subtitlePositionDefault;
+    _subtitleBgOpacity = AppSpacing.subtitleBgOpacityDefault;
+    _hardwareAccelerationEnabled = true;
     await clearThumbnailCache();
     _safeNotify();
   }

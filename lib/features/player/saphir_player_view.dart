@@ -8,8 +8,14 @@ import '../../core/constants/app_strings.dart';
 import '../../core/theme/effect_mode.dart';
 import '../../widgets/surface_panel.dart';
 import 'saphir_player_controller.dart';
+import 'widgets/player_action_osd.dart';
 import 'widgets/player_auto_next_card.dart';
 import 'widgets/player_bottom_hud.dart';
+import 'widgets/player_diagnostics_overlay.dart';
+import 'widgets/player_episode_drawer.dart';
+import 'widgets/player_intro_skip_button.dart';
+import 'widgets/player_mini_hud.dart';
+import 'widgets/player_shortcut_sheet.dart';
 import 'widgets/player_top_hud.dart';
 
 class SaphirPlayerView extends StatefulWidget {
@@ -35,9 +41,7 @@ class _SaphirPlayerViewState extends State<SaphirPlayerView> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _focusNode.requestFocus();
-      }
+      if (mounted) _focusNode.requestFocus();
     });
   }
 
@@ -48,23 +52,87 @@ class _SaphirPlayerViewState extends State<SaphirPlayerView> {
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent) {
-      return KeyEventResult.ignored;
-    }
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final c = widget.controller;
     final key = event.logicalKey;
+    final shift = HardwareKeyboard.instance.isShiftPressed;
+
     if (key == LogicalKeyboardKey.space) {
-      widget.controller.togglePlayPause();
+      c.togglePlayPause();
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.arrowLeft) {
-      widget.controller.seekRelativeSeconds(-AppSpacing.seekStepSeconds);
+      c.seekRelativeSeconds(
+        -(shift ? AppSpacing.seekStepLongSeconds : AppSpacing.seekStepSeconds),
+      );
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.arrowRight) {
-      widget.controller.seekRelativeSeconds(AppSpacing.seekStepSeconds);
+      c.seekRelativeSeconds(
+        shift ? AppSpacing.seekStepLongSeconds : AppSpacing.seekStepSeconds,
+      );
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowUp) {
+      c.adjustVolume(AppSpacing.volumeStep);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowDown) {
+      c.adjustVolume(-AppSpacing.volumeStep);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.keyF) {
+      c.toggleFullscreen();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.keyM) {
+      c.toggleMute();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.keyN) {
+      c.playNextEpisode();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.keyP) {
+      c.playPreviousEpisode();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.period) {
+      c.stepFrame(forward: true);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.comma) {
+      c.stepFrame(forward: false);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.keyA) {
+      c.cycleAspectMode();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.keyB) {
+      c.addBookmarkAtCurrentPosition();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.keyS) {
+      c.captureScreenshot();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.keyE) {
+      c.toggleEpisodeDrawer();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.keyI) {
+      c.toggleDiagnostics();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.keyH ||
+        key == LogicalKeyboardKey.question ||
+        event.character == '?') {
+      c.toggleShortcutSheet();
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.escape) {
+      if (c.closeTopOverlay()) return KeyEventResult.handled;
       _exitPlayer();
       return KeyEventResult.handled;
     }
@@ -131,54 +199,61 @@ class _SaphirPlayerViewState extends State<SaphirPlayerView> {
   }
 
   Widget _buildPlayerStack(BuildContext context, bool hudVisible) {
+    final c = widget.controller;
     final isGlass = widget.effectMode == EffectMode.glass;
-    final next = widget.controller.nextEntry;
-
+    final next = c.nextEntry;
     final topHud = PlayerTopHud(
-      entry: widget.controller.currentEntry,
-      isFullscreen: widget.controller.isFullscreen,
+      entry: c.currentEntry,
+      isFullscreen: c.isFullscreen,
       onClose: _exitPlayer,
-      onToggleFullscreen: widget.controller.toggleFullscreen,
+      onToggleFullscreen: c.toggleFullscreen,
+      hasEpisodeQueue: (c.session?.queue.length ?? 0) > 1,
+      sleepTimerOption: c.sleepTimerOption,
+      sleepTimerRemaining: c.sleepTimerRemaining,
+      onAddBookmark: c.addBookmarkAtCurrentPosition,
+      onCaptureScreenshot: c.captureScreenshot,
+      onToggleEpisodeDrawer: c.toggleEpisodeDrawer,
+      onToggleMiniPlayer: c.toggleMiniPlayer,
+      onToggleDiagnostics: c.toggleDiagnostics,
+      onToggleShortcutSheet: c.toggleShortcutSheet,
     );
-    final bottomHud = PlayerBottomHud(controller: widget.controller);
+    final bottomHud = PlayerBottomHud(
+      controller: c,
+      effectMode: widget.effectMode,
+    );
 
     return Stack(
       fit: StackFit.expand,
       children: [
-        Video(
-          controller: widget.controller.videoController,
-          controls: NoVideoControls,
-        ),
-        if (widget.controller.errorMessage != null)
-          Center(
-            child: SurfacePanel(
-              effectMode: widget.effectMode,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    widget.controller.errorMessage!,
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                  ElevatedButton(
-                    onPressed: _exitPlayer,
-                    child: const Text(AppStrings.backButton),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        if (widget.controller.showAutoNextCard && next != null)
-          PlayerAutoNextCard(
-            nextEntry: next,
-            remainingSeconds: widget.controller.autoNextRemainingSeconds,
+        Video(controller: c.videoController, controls: NoVideoControls),
+        if (c.errorMessage != null) _buildErrorCard(context, c.errorMessage!),
+        if (!c.isMiniPlayer && c.showIntroSkipButton)
+          PlayerIntroSkipButton(
             effectMode: widget.effectMode,
             hudVisible: hudVisible,
-            onPlayNext: widget.controller.playNextEpisode,
-            onDismiss: widget.controller.dismissAutoNext,
+            selectedSeconds: c.effectiveIntroSkipSeconds,
+            onSkipIntro: c.skipIntro,
+            onSelectSeconds: c.setSeriesIntroSkipSeconds,
           ),
-        if (isGlass)
+        if (!c.isMiniPlayer && c.showAutoNextCard && next != null)
+          PlayerAutoNextCard(
+            nextEntry: next,
+            remainingSeconds: c.autoNextRemainingSeconds,
+            effectMode: widget.effectMode,
+            hudVisible: hudVisible,
+            onPlayNext: c.playNextEpisode,
+            onDismiss: c.dismissAutoNext,
+          ),
+        if (c.isMiniPlayer)
+          PlayerMiniHud(
+            isPlaying: c.isPlaying,
+            effectMode: widget.effectMode,
+            onTogglePlayPause: c.togglePlayPause,
+            onExitMiniPlayer: c.toggleMiniPlayer,
+            onClose: _exitPlayer,
+            onStartDrag: c.startMiniPlayerWindowDrag,
+          )
+        else if (isGlass)
           Positioned.fill(
             child: IgnorePointer(
               ignoring: !hudVisible,
@@ -195,7 +270,50 @@ class _SaphirPlayerViewState extends State<SaphirPlayerView> {
           topHud,
           bottomHud,
         ],
+        if (!c.isMiniPlayer && c.showDiagnostics)
+          PlayerDiagnosticsOverlay(
+            diagnostics: c.diagnostics,
+            effectMode: widget.effectMode,
+            onClose: c.toggleDiagnostics,
+          ),
+        if (!c.isMiniPlayer && c.isEpisodeDrawerOpen && c.session != null)
+          PlayerEpisodeDrawer(
+            queue: c.session!.queue,
+            currentIndex: c.currentIndex,
+            effectMode: widget.effectMode,
+            onSelectIndex: c.playEntryAtIndex,
+            onClose: c.toggleEpisodeDrawer,
+          ),
+        if (!c.isMiniPlayer && c.isShortcutSheetOpen)
+          PlayerShortcutSheet(
+            effectMode: widget.effectMode,
+            onClose: c.toggleShortcutSheet,
+          ),
+        PlayerActionOsd(
+          message: c.osdMessage,
+          kind: c.osdKind,
+          effectMode: widget.effectMode,
+        ),
       ],
+    );
+  }
+
+  Widget _buildErrorCard(BuildContext context, String message) {
+    return Center(
+      child: SurfacePanel(
+        effectMode: widget.effectMode,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(message, style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: AppSpacing.md),
+            ElevatedButton(
+              onPressed: _exitPlayer,
+              child: const Text(AppStrings.backButton),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

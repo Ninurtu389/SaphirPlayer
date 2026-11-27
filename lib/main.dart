@@ -55,6 +55,7 @@ Future<void> main() async {
     databaseService,
     syncService,
     () => settingsController.nasPath,
+    settingsController: settingsController,
   );
 
   final shellController = ShellController();

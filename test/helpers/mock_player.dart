@@ -4,6 +4,7 @@ import 'package:flutter/painting.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:saphir_player/features/player/player_models.dart';
 
 class MockPlayer extends Mock implements Player {}
 
@@ -81,6 +82,27 @@ class FakePlayerHarness {
   Object? openError;
   bool _currentPlaying = false;
   double _currentVolume = 100.0;
+  Uint8List? screenshotBytes = Uint8List.fromList([0x89, 0x50, 0x4E, 0x47]);
+
+  final List<bool> alwaysOnTopStates = [];
+  final List<Rect> windowBoundsHistory = [];
+  final List<Size> windowMinSizeHistory = [];
+  Rect currentWindowBounds = const Rect.fromLTWH(100, 100, 1280, 800);
+  String? pickedSubtitlePath;
+  int dragCount = 0;
+
+  PlayerWindowAdapter get windowAdapter => PlayerWindowAdapter(
+        setFullScreen: onSetFullScreen,
+        setAlwaysOnTop: (val) async => alwaysOnTopStates.add(val),
+        getWindowBounds: () async => currentWindowBounds,
+        setWindowBounds: (rect) async {
+          currentWindowBounds = rect;
+          windowBoundsHistory.add(rect);
+        },
+        setWindowMinimumSize: (size) async => windowMinSizeHistory.add(size),
+        pickSubtitleFile: (_) async => pickedSubtitlePath,
+        startWindowDragging: () async => dragCount++,
+      );
 
   void _wireMocks() {
     when(() => player.stream).thenReturn(stream);
@@ -175,6 +197,12 @@ class FakePlayerHarness {
       stoppedCount++;
       emitPlaying(false);
     });
+    when(
+      () => player.screenshot(
+        format: any(named: 'format'),
+        includeLibassSubtitles: any(named: 'includeLibassSubtitles'),
+      ),
+    ).thenAnswer((_) async => screenshotBytes);
     when(() => player.dispose()).thenAnswer((_) async {
       disposed = true;
     });

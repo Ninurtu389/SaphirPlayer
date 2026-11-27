@@ -2,6 +2,7 @@ import '../../core/constants/app_spacing.dart';
 import '../../core/services/desktop_platform_service.dart';
 import '../../core/storage/database_service.dart';
 import 'playback_session.dart';
+import 'player_models.dart';
 
 class PlaybackPersistenceService {
   PlaybackPersistenceService(this._databaseService);
@@ -24,12 +25,11 @@ class PlaybackPersistenceService {
     _activeHistoryDayKey = null;
   }
 
-  ({String? audioTrack, String? subtitleTrack})? loadSeriesPreferences(
-    int seriesId,
-  ) {
+  ({String? audioTrack, String? subtitleTrack, int introSkipSeconds})?
+      loadSeriesPreferences(int seriesId) {
     final db = _databaseService.instance;
     final rows = db.select(
-      'SELECT audio_track, subtitle_track FROM series_preferences WHERE series_id = ? LIMIT 1;',
+      'SELECT audio_track, subtitle_track, intro_skip_seconds FROM series_preferences WHERE series_id = ? LIMIT 1;',
       [seriesId],
     );
     if (rows.isEmpty) {
@@ -38,24 +38,111 @@ class PlaybackPersistenceService {
     return (
       audioTrack: rows.first['audio_track'] as String?,
       subtitleTrack: rows.first['subtitle_track'] as String?,
+      introSkipSeconds: (rows.first['intro_skip_seconds'] as int?) ?? 0,
     );
   }
 
   void saveSeriesPreferences(
     int seriesId,
     String audioTrackId,
-    String subtitleTrackId,
-  ) {
+    String subtitleTrackId, {
+    int? introSkipSeconds,
+  }) {
+    final db = _databaseService.instance;
+    if (introSkipSeconds == null) {
+      db.execute(
+        '''
+        INSERT INTO series_preferences (series_id, audio_track, subtitle_track)
+        VALUES (?, ?, ?)
+        ON CONFLICT(series_id) DO UPDATE SET
+          audio_track = excluded.audio_track,
+          subtitle_track = excluded.subtitle_track;
+        ''',
+        [seriesId, audioTrackId, subtitleTrackId],
+      );
+      return;
+    }
+
+    db.execute(
+      '''
+      INSERT INTO series_preferences (series_id, audio_track, subtitle_track, intro_skip_seconds)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(series_id) DO UPDATE SET
+        audio_track = excluded.audio_track,
+        subtitle_track = excluded.subtitle_track,
+        intro_skip_seconds = excluded.intro_skip_seconds;
+      ''',
+      [seriesId, audioTrackId, subtitleTrackId, introSkipSeconds],
+    );
+  }
+
+  void saveSeriesIntroSkip(int seriesId, int seconds) {
+    final clamped = seconds.clamp(0, AppSpacing.introSkipWindowSeconds);
     final db = _databaseService.instance;
     db.execute(
       '''
-      INSERT INTO series_preferences (series_id, audio_track, subtitle_track)
-      VALUES (?, ?, ?)
+      INSERT INTO series_preferences (series_id, intro_skip_seconds)
+      VALUES (?, ?)
       ON CONFLICT(series_id) DO UPDATE SET
-        audio_track = excluded.audio_track,
-        subtitle_track = excluded.subtitle_track;
+        intro_skip_seconds = excluded.intro_skip_seconds;
       ''',
-      [seriesId, audioTrackId, subtitleTrackId],
+      [seriesId, clamped],
+    );
+  }
+
+  List<MediaBookmark> loadBookmarks(String mediaKey) {
+    final db = _databaseService.instance;
+    final rows = db.select(
+      '''
+      SELECT id, media_key, position_ms, label, created_at
+      FROM media_bookmarks
+      WHERE media_key = ?
+      ORDER BY position_ms ASC, id ASC;
+      ''',
+      [mediaKey],
+    );
+    return rows
+        .map(
+          (r) => MediaBookmark(
+            id: r['id'] as int,
+            mediaKey: r['media_key'] as String,
+            positionMs: (r['position_ms'] as int?) ?? 0,
+            label: (r['label'] as String?) ?? '',
+            createdAt: (r['created_at'] as int?) ?? 0,
+          ),
+        )
+        .toList();
+  }
+
+  MediaBookmark addBookmark(
+    String mediaKey,
+    int positionMs, {
+    String label = '',
+  }) {
+    final db = _databaseService.instance;
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final safePos = positionMs < 0 ? 0 : positionMs;
+    db.execute(
+      '''
+      INSERT INTO media_bookmarks (media_key, position_ms, label, created_at)
+      VALUES (?, ?, ?, ?);
+      ''',
+      [mediaKey, safePos, label, nowMs],
+    );
+    return MediaBookmark(
+      id: db.lastInsertRowId,
+      mediaKey: mediaKey,
+      positionMs: safePos,
+      label: label,
+      createdAt: nowMs,
+    );
+  }
+
+  void deleteBookmark(int bookmarkId) {
+    final db = _databaseService.instance;
+    db.execute(
+      'DELETE FROM media_bookmarks WHERE id = ?;',
+      [bookmarkId],
     );
   }
 

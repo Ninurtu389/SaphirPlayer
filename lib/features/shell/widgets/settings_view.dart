@@ -5,6 +5,7 @@ import '../../../core/constants/app_strings.dart';
 import '../../../core/controllers/library_controller.dart';
 import '../../../core/controllers/settings_controller.dart';
 import '../../../core/theme/effect_mode.dart';
+import 'settings_subtitle_section.dart';
 
 class SettingsView extends StatelessWidget {
   const SettingsView({
@@ -59,6 +60,8 @@ class SettingsView extends StatelessWidget {
               const SizedBox(height: AppSpacing.md),
               _buildAppearanceSection(context),
               const SizedBox(height: AppSpacing.md),
+              SettingsSubtitleSection(settingsController: settingsController),
+              const SizedBox(height: AppSpacing.md),
               _buildSyncSection(context),
             ],
           ),
@@ -69,7 +72,7 @@ class SettingsView extends StatelessWidget {
 
   Widget _buildMediaSection(BuildContext context) {
     final folders = settingsController.nasPaths;
-    return _SettingsSectionCard(
+    return SettingsSectionCard(
       title: AppStrings.settingsMediaSectionTitle,
       description: AppStrings.settingsMediaSectionDesc,
       child: Column(
@@ -142,7 +145,7 @@ class SettingsView extends StatelessWidget {
   }
 
   Widget _buildAppearanceSection(BuildContext context) {
-    return _SettingsSectionCard(
+    return SettingsSectionCard(
       title: AppStrings.settingsAppearanceSectionTitle,
       description: AppStrings.settingsAppearanceSectionDesc,
       child: Column(
@@ -188,13 +191,28 @@ class SettingsView extends StatelessWidget {
               onChanged: settingsController.updatePerDeviceEffect,
             ),
           ),
+          const Divider(height: AppSpacing.dividerThickness),
+          Material(
+            color: AppColors.borderTransparent,
+            child: SwitchListTile(
+              tileColor: AppColors.borderTransparent,
+              contentPadding: EdgeInsets.zero,
+              title: const Text(AppStrings.settingsHwdecLabel),
+              subtitle: Text(
+                AppStrings.settingsHwdecDesc,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              value: settingsController.hardwareAccelerationEnabled,
+              onChanged: settingsController.updateHardwareAcceleration,
+            ),
+          ),
         ],
       ),
     );
   }
 
   Widget _buildSyncSection(BuildContext context) {
-    return _SettingsSectionCard(
+    return SettingsSectionCard(
       title: AppStrings.settingsSyncSectionTitle,
       description: AppStrings.settingsSyncSectionDesc,
       child: Column(
@@ -305,40 +323,6 @@ class _FolderListItem extends StatelessWidget {
               size: AppSpacing.iconSizeMd,
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SettingsSectionCard extends StatelessWidget {
-  const _SettingsSectionCard({
-    required this.title,
-    required this.description,
-    required this.child,
-  });
-
-  final String title;
-  final String description;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(AppSpacing.lg),
-      decoration: BoxDecoration(
-        color: AppColors.anthraciteSurface,
-        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title, style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: AppSpacing.xxs),
-          Text(description, style: Theme.of(context).textTheme.bodySmall),
-          const SizedBox(height: AppSpacing.md),
-          child,
         ],
       ),
     );

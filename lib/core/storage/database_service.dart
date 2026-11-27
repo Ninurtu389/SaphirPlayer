@@ -2,6 +2,8 @@ import 'package:sqlite3/sqlite3.dart';
 import 'portable_paths.dart';
 
 class DatabaseService {
+  static const int schemaVersion = 2;
+
   Database? _db;
 
   Future<void> open({String? dbPath}) async {
@@ -15,13 +17,16 @@ class DatabaseService {
       db.execute('PRAGMA synchronous = NORMAL;');
       db.execute('PRAGMA foreign_keys = ON;');
       db.execute('PRAGMA busy_timeout = 5000;');
-      _createSchema(db);
       final versionRows = db.select('PRAGMA user_version;');
       final currentVersion = versionRows.isNotEmpty
           ? (versionRows.first.values.first as int? ?? 0)
           : 0;
+      _createSchema(db);
       if (currentVersion == 0) {
-        db.execute('PRAGMA user_version = 1;');
+        db.execute('PRAGMA user_version = $schemaVersion;');
+      } else if (currentVersion < schemaVersion) {
+        _migrateSchema(db, currentVersion);
+        db.execute('PRAGMA user_version = $schemaVersion;');
       }
       _db = db;
     } catch (_) {
@@ -113,9 +118,23 @@ class DatabaseService {
         series_id INTEGER PRIMARY KEY,
         audio_track TEXT,
         subtitle_track TEXT,
+        intro_skip_seconds INTEGER NOT NULL DEFAULT 0,
         FOREIGN KEY (series_id) REFERENCES series(id) ON DELETE CASCADE
       );
     ''');
+
+    db.execute('''
+      CREATE TABLE IF NOT EXISTS media_bookmarks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        media_key TEXT NOT NULL,
+        position_ms INTEGER NOT NULL,
+        label TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL
+      );
+    ''');
+    db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_media_bookmarks_key ON media_bookmarks(media_key);',
+    );
 
     db.execute('''
       CREATE TABLE IF NOT EXISTS watch_history (
@@ -141,10 +160,37 @@ class DatabaseService {
     );
   }
 
+  void _migrateSchema(Database db, int fromVersion) {
+    if (fromVersion < 2) {
+      final columns = db.select('PRAGMA table_info(series_preferences);');
+      final hasIntroSkip = columns.any(
+        (col) => col['name'] == 'intro_skip_seconds',
+      );
+      if (!hasIntroSkip) {
+        db.execute(
+          'ALTER TABLE series_preferences ADD COLUMN intro_skip_seconds INTEGER NOT NULL DEFAULT 0;',
+        );
+      }
+      db.execute('''
+        CREATE TABLE IF NOT EXISTS media_bookmarks (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          media_key TEXT NOT NULL,
+          position_ms INTEGER NOT NULL,
+          label TEXT NOT NULL DEFAULT '',
+          created_at INTEGER NOT NULL
+        );
+      ''');
+      db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_media_bookmarks_key ON media_bookmarks(media_key);',
+      );
+    }
+  }
+
   void resetDatabase() {
     final db = instance;
     db.execute('BEGIN TRANSACTION;');
     try {
+      db.execute('DELETE FROM media_bookmarks;');
       db.execute('DELETE FROM watch_history;');
       db.execute('DELETE FROM watch_progress;');
       db.execute('DELETE FROM series_preferences;');

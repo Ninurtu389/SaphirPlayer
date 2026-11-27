@@ -45,6 +45,15 @@ class PortablePaths {
     return dir.path;
   }
 
+  static Future<String> getScreenshotsDirectory() async {
+    final baseDir = await resolveBaseDirectory();
+    final dir = Directory(p.join(baseDir, 'screenshots'));
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    return dir.path;
+  }
+
   static Future<String> getDatabaseFilePath() async {
     final dataDir = await getDataDirectory();
     return p.join(dataDir, 'saphir_player.db');

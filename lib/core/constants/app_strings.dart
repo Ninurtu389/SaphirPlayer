@@ -168,4 +168,120 @@ class AppStrings {
     'Samstag',
     'Sonntag',
   ];
+
+  static const String settingsHwdecLabel =
+      'Hardware-Dekodierung (pro Gerät)';
+  static const String settingsHwdecDesc =
+      'Nutzt GPU-Beschleunigung für flüssige Wiedergabe (wird beim nächsten Player-Start aktiv).';
+  static const String settingsSubtitlesSectionTitle = 'Untertitel & Sprache';
+  static const String settingsSubtitlesSectionDesc =
+      'Standardverhalten, bevorzugte Sprache und Darstellung für neue Videos.';
+  static const String settingsSubtitlesDefaultLabel =
+      'Untertitel standardmäßig aktivieren';
+  static const String settingsSubtitlesDefaultDesc =
+      'Gespeicherte Serien-Präferenzen haben stets Vorrang.';
+  static const String settingsSubtitleLanguageLabel =
+      'Bevorzugte Untertitel-Sprache';
+  static const String subtitleLangCodeDe = 'de';
+  static const String subtitleLangCodeEn = 'en';
+  static const String subtitleLangCodeAuto = 'auto';
+  static const String subtitleLangDe = 'Deutsch';
+  static const String subtitleLangEn = 'Englisch';
+  static const String subtitleLangAuto = 'Automatisch / Original';
+  static const String subtitleScaleLabel = 'Schriftgröße';
+  static const String subtitlePositionLabel = 'Vertikale Position';
+  static const String subtitleBgOpacityLabel = 'Hintergrund-Kontrast';
+  static const String percentSymbol = '%';
+  static const String timesSymbol = '×';
+
+  static const String playerNightModeLabel = 'Nachtmodus (Dialog-Boost)';
+  static const String playerVolumeBoostLabel = 'Lautstärke-Boost (150 %)';
+  static const String playerAudioDelayLabel = 'Audio-Sync';
+  static const String playerSubtitleDelayLabel = 'Untertitel-Sync';
+  static const String playerDelayMinusLabel = '-100 ms';
+  static const String playerDelayPlusLabel = '+100 ms';
+  static const String playerDelayResetLabel = 'Reset';
+  static const String playerDelayUnitMs = 'ms';
+  static const String playerLoadExternalSubLabel =
+      'Externe Datei laden (.srt/.ass/.vtt)';
+  static const String playerPickSubtitleDialogTitle =
+      'Untertiteldatei auswählen';
+  static const String playerSubtitleStyleLabel = 'Untertitel-Styling';
+  static const String playerSubtitleStyleTitle = 'Untertitel-Darstellung';
+  static const String playerAspectModeTooltip = 'Seitenverhältnis / Zoom (A)';
+  static const String aspectOriginalLabel = 'Original';
+  static const String aspectFillCropLabel = 'Füllen / Crop';
+  static const String aspect16x9Label = '16:9';
+  static const String aspect21x9Label = '21:9';
+
+  static const String playerChapterPrefix = 'Kapitel';
+  static const String playerIntroSkipButton = 'Intro überspringen';
+  static const String playerIntroSkipSettingsTooltip =
+      'Intro-Dauer für Serie festlegen';
+  static const String playerIntroSkipSecondsSuffix = 'Sek.';
+  static const String playerBookmarkTooltip = 'Lesezeichen setzen (B)';
+  static const String playerBookmarkAddedOsd = 'Lesezeichen gespeichert';
+  static const String playerBookmarkDeletedOsd = 'Lesezeichen entfernt';
+  static const String playerBookmarkListTitle = 'Szenen-Lesezeichen';
+  static const String playerNoBookmarksLabel = 'Keine Lesezeichen';
+  static const String playerScreenshotTooltip = 'Screenshot speichern (S)';
+  static const String playerScreenshotSavedOsd = 'Screenshot gespeichert';
+  static const String playerScreenshotFailedOsd =
+      'Screenshot fehlgeschlagen';
+  static const String playerFinishTimePrefix = 'Fertig um';
+  static const String playerTimeToggleTooltip =
+      'Anzeige wechseln (Gesamt / Rest / Endzeit)';
+
+  static const String playerEpisodeDrawerTooltip = 'Episodenliste (E)';
+  static const String playerEpisodeDrawerTitle = 'Episoden';
+  static const String playerMiniPlayerTooltip = 'Mini-Player (Always on Top)';
+  static const String playerMiniPlayerExitTooltip = 'Zurück zur Normalansicht';
+  static const String playerSleepTimerTooltip = 'Sleep-Timer';
+  static const String sleepTimerOffLabel = 'Aus';
+  static const String sleepTimerEndOfEpisodeLabel = 'Nach dieser Folge';
+  static const String sleepTimer30MinLabel = '30 Min.';
+  static const String sleepTimer60MinLabel = '60 Min.';
+  static const String sleepTimerTriggeredOsd = 'Sleep-Timer abgelaufen';
+  static const String sleepTimerBadgeEndOfEp = 'Ende Folge';
+  static const String playerDiagnosticsTooltip = 'Diagnose (I)';
+  static const String playerDiagnosticsTitle = 'Stats for Nerds';
+  static const String diagVideoCodecLabel = 'Video-Codec';
+  static const String diagAudioCodecLabel = 'Audio-Codec';
+  static const String diagResolutionLabel = 'Auflösung';
+  static const String diagFpsLabel = 'FPS';
+  static const String diagHwdecLabel = 'HW-Decoder';
+  static const String diagUnknownValue = '–';
+  static const String playerShortcutsTooltip = 'Tastenkürzel (?)';
+  static const String playerShortcutsTitle = 'Tastenkürzel';
+  static const String playerCloseOverlayAction = 'Schließen';
+
+  static const String osdMuteOn = 'Stumm';
+  static const String osdMuteOff = 'Ton an';
+  static const String osdNightModeOn = 'Nachtmodus an';
+  static const String osdNightModeOff = 'Nachtmodus aus';
+  static const String osdVolumeBoostOn = 'Boost 150 % an';
+  static const String osdVolumeBoostOff = 'Boost aus';
+  static const String osdFrameStepForward = 'Einzelbild vor';
+  static const String osdFrameStepBack = 'Einzelbild zurück';
+  static const String osdExternalSubLoaded = 'Untertitel geladen';
+  static const String osdSleepTimerSetPrefix = 'Sleep-Timer:';
+  static const String osdSleepTimerOff = 'Sleep-Timer aus';
+
+  static const List<(String, String)> playerShortcutEntries = [
+    ('Leertaste', 'Wiedergabe / Pause'),
+    ('← / →', '10 Sek. zurück / vor'),
+    ('Shift + ← / →', '60 Sek. zurück / vor'),
+    ('↑ / ↓ / Mausrad', 'Lautstärke regeln'),
+    ('F / Doppelklick', 'Vollbild umschalten'),
+    ('M', 'Stummschalten'),
+    ('N / P / X-Tasten', 'Nächste / Vorherige Folge'),
+    ('. / ,', 'Einzelbild vorwärts / rückwärts'),
+    ('A', 'Seitenverhältnis / Zoom'),
+    ('B', 'Lesezeichen setzen'),
+    ('S', 'Screenshot speichern'),
+    ('E', 'Episodenliste umschalten'),
+    ('I', 'Diagnose-Overlay'),
+    ('? / H', 'Tastenkürzel anzeigen'),
+    ('Esc', 'Overlay schließen / Player beenden'),
+  ];
 }

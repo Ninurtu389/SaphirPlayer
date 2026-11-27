@@ -2,36 +2,27 @@ import 'package:material_ui/material_ui.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_spacing.dart';
 import '../../../core/constants/app_strings.dart';
-import '../../../core/utils/formatters.dart';
+import '../../../core/theme/effect_mode.dart';
 import '../saphir_player_controller.dart';
+import 'player_seek_bar.dart';
 import 'player_track_menus.dart';
 
-class PlayerBottomHud extends StatefulWidget {
+class PlayerBottomHud extends StatelessWidget {
   const PlayerBottomHud({
     super.key,
     required this.controller,
+    this.effectMode = EffectMode.glass,
   });
 
   final SaphirPlayerController controller;
-
-  @override
-  State<PlayerBottomHud> createState() => _PlayerBottomHudState();
-}
-
-class _PlayerBottomHudState extends State<PlayerBottomHud> {
-  bool _isSeekHovered = false;
+  final EffectMode effectMode;
 
   @override
   Widget build(BuildContext context) {
-    final controller = widget.controller;
-    final durMs = controller.duration.inMilliseconds;
-    final posMs = controller.position.inMilliseconds;
-    final sliderValue = durMs > 0 ? (posMs / durMs).clamp(0.0, 1.0) : 0.0;
-
     return Positioned(
-      bottom: 0,
-      left: 0,
-      right: 0,
+      bottom: AppSpacing.zero,
+      left: AppSpacing.zero,
+      right: AppSpacing.zero,
       child: Container(
         constraints: const BoxConstraints(
           minHeight: AppSpacing.playerBottomHudHeight,
@@ -49,7 +40,7 @@ class _PlayerBottomHudState extends State<PlayerBottomHud> {
           mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
-            _buildSeekRow(context, sliderValue),
+            PlayerSeekBar(controller: controller, effectMode: effectMode),
             const SizedBox(height: AppSpacing.xs),
             _buildControlsRow(context),
           ],
@@ -58,50 +49,7 @@ class _PlayerBottomHudState extends State<PlayerBottomHud> {
     );
   }
 
-  Widget _buildSeekRow(BuildContext context, double sliderValue) {
-    final controller = widget.controller;
-    return Row(
-      children: [
-        Text(
-          Formatters.formatPlayerDuration(controller.position),
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-        const SizedBox(width: AppSpacing.sm),
-        Expanded(
-          child: MouseRegion(
-            onEnter: (_) => setState(() => _isSeekHovered = true),
-            onExit: (_) => setState(() => _isSeekHovered = false),
-            child: SliderTheme(
-              data: SliderTheme.of(context).copyWith(
-                trackHeight: AppSpacing.playerSeekTrackHeight,
-                activeTrackColor: AppColors.sapphireBright,
-                inactiveTrackColor: AppColors.progressTrack,
-                thumbColor: AppColors.sapphireBright,
-                overlayColor: AppColors.sapphireGlow,
-                thumbShape: RoundSliderThumbShape(
-                  enabledThumbRadius: _isSeekHovered
-                      ? AppSpacing.playerSeekThumbRadiusHover
-                      : AppSpacing.playerSeekThumbRadius,
-                ),
-              ),
-              child: Slider(
-                value: sliderValue,
-                onChanged: controller.seekToRatio,
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(width: AppSpacing.sm),
-        Text(
-          Formatters.formatPlayerDuration(controller.duration),
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-      ],
-    );
-  }
-
   Widget _buildControlsRow(BuildContext context) {
-    final controller = widget.controller;
     final next = controller.nextEntry;
     final nextTooltip = next != null
         ? '${AppStrings.playerNextEpisodeTooltip}: ${next.subtitle.isNotEmpty ? next.subtitle : next.title}'
@@ -111,7 +59,6 @@ class _PlayerBottomHudState extends State<PlayerBottomHud> {
       builder: (context, constraints) {
         final isCompact =
             constraints.maxWidth < AppSpacing.compactPlayerBreakpoint;
-
         final transportButtons = [
           IconButton(
             tooltip: AppStrings.playerPrevEpisodeTooltip,
@@ -175,7 +122,7 @@ class _PlayerBottomHudState extends State<PlayerBottomHud> {
             children: [
               ...transportButtons,
               muteButton,
-              PlayerTrackMenus(controller: controller),
+              PlayerTrackMenus(controller: controller, effectMode: effectMode),
             ],
           );
         }
@@ -199,10 +146,10 @@ class _PlayerBottomHudState extends State<PlayerBottomHud> {
                 ),
                 child: Slider(
                   min: AppSpacing.volumeMin,
-                  max: AppSpacing.volumeMax,
+                  max: controller.maxVolume,
                   value: controller.volume.clamp(
                     AppSpacing.volumeMin,
-                    AppSpacing.volumeMax,
+                    controller.maxVolume,
                   ),
                   onChanged: (val) =>
                       controller.adjustVolume(val - controller.volume),
@@ -210,7 +157,7 @@ class _PlayerBottomHudState extends State<PlayerBottomHud> {
               ),
             ),
             const Spacer(),
-            PlayerTrackMenus(controller: controller),
+            PlayerTrackMenus(controller: controller, effectMode: effectMode),
           ],
         );
       },

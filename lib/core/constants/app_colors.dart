@@ -28,6 +28,10 @@ class AppColors {
   static const Color successGreen = Color(0xFF25B869);
   static const Color progressTrack = Color(0xFF28354D);
   static const Color errorRed = Color(0xFFE05252);
+  static const Color chapterMarker = Color(0x99F2F6FC);
+  static const Color bookmarkMarker = Color(0xFF4B9BFF);
+  static const Color warningAmber = Color(0xFFE5A11D);
+  static const Color activeTileFill = Color(0x261D6FE5);
 
   static const LinearGradient heroVerticalFadeGradient = LinearGradient(
     begin: Alignment.topCenter,

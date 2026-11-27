@@ -31,6 +31,7 @@ void main() {
           'watch_progress',
           'series_preferences',
           'watch_history',
+          'media_bookmarks',
         ]),
       );
 
@@ -40,14 +41,18 @@ void main() {
           .toSet();
       expect(
         indices,
-        containsAll(['idx_watch_history_day', 'idx_watch_history_media']),
+        containsAll([
+          'idx_watch_history_day',
+          'idx_watch_history_media',
+          'idx_media_bookmarks_key',
+        ]),
       );
 
       final fk = db.select('PRAGMA foreign_keys;').first.values.first;
       expect(fk, 1);
 
       final version = db.select('PRAGMA user_version;').first.values.first;
-      expect(version, 1);
+      expect(version, 2);
     });
 
     test('throws StateError when accessed before open()', () {
