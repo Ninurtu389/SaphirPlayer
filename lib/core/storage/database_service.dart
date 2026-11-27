@@ -4,7 +4,7 @@ import 'portable_paths.dart';
 import 'sync_key_utils.dart';
 
 class DatabaseService {
-  static const int schemaVersion = 3;
+  static const int schemaVersion = 4;
 
   Database? _db;
 
@@ -98,6 +98,9 @@ class DatabaseService {
         thumb_path TEXT,
         sync_key TEXT,
         thumb_status TEXT NOT NULL DEFAULT 'pending',
+        artist TEXT,
+        file_size INTEGER NOT NULL DEFAULT 0,
+        modified_at INTEGER NOT NULL DEFAULT 0,
         FOREIGN KEY (series_id) REFERENCES series(id) ON DELETE CASCADE,
         FOREIGN KEY (season_id) REFERENCES seasons(id) ON DELETE CASCADE
       );
@@ -114,7 +117,10 @@ class DatabaseService {
         duration_ms INTEGER NOT NULL DEFAULT 0,
         last_watched_at INTEGER,
         sync_key TEXT,
-        thumb_status TEXT NOT NULL DEFAULT 'pending'
+        thumb_status TEXT NOT NULL DEFAULT 'pending',
+        artist TEXT,
+        file_size INTEGER NOT NULL DEFAULT 0,
+        modified_at INTEGER NOT NULL DEFAULT 0
       );
     ''');
 
@@ -264,6 +270,15 @@ class DatabaseService {
         db.execute('ROLLBACK;');
         rethrow;
       }
+    }
+
+    if (fromVersion < 4) {
+      _ensureColumn(db, 'episodes', 'artist', 'TEXT');
+      _ensureColumn(db, 'episodes', 'file_size', 'INTEGER NOT NULL DEFAULT 0');
+      _ensureColumn(db, 'episodes', 'modified_at', 'INTEGER NOT NULL DEFAULT 0');
+      _ensureColumn(db, 'movies', 'artist', 'TEXT');
+      _ensureColumn(db, 'movies', 'file_size', 'INTEGER NOT NULL DEFAULT 0');
+      _ensureColumn(db, 'movies', 'modified_at', 'INTEGER NOT NULL DEFAULT 0');
     }
   }
 

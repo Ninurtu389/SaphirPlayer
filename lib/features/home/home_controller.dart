@@ -45,7 +45,8 @@ class HomeController extends ChangeNotifier {
         .where(
           (item) =>
               item.title.toLowerCase().contains(_searchQuery) ||
-              item.subtitle.toLowerCase().contains(_searchQuery),
+              item.subtitle.toLowerCase().contains(_searchQuery) ||
+              (item.artist ?? '').toLowerCase().contains(_searchQuery),
         )
         .toList();
   }
@@ -137,6 +138,7 @@ class HomeController extends ChangeNotifier {
           startPositionMs: item.mediaType == 'movie'
               ? getMovieResumePositionMs(item.mediaKey)
               : 0,
+          artist: item.artist,
         ),
       ],
       initialIndex: 0,

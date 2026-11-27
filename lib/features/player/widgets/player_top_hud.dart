@@ -81,6 +81,9 @@ class PlayerTopHud extends StatelessWidget {
   }
 
   Widget _buildTitleColumn(BuildContext context) {
+    final hudSubtitle = entry != null
+        ? Formatters.formatPlayerHudSubtitle(entry!.subtitle, entry!.artist)
+        : '';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -91,9 +94,9 @@ class PlayerTopHud extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
           style: Theme.of(context).textTheme.titleMedium,
         ),
-        if (entry != null && entry!.subtitle.isNotEmpty)
+        if (hudSubtitle.isNotEmpty)
           Text(
-            entry!.subtitle,
+            hudSubtitle,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: Theme.of(context).textTheme.bodySmall,

@@ -34,6 +34,7 @@ class MediaRepository {
         e.series_id,
         e.episode_number,
         e.title AS episode_title,
+        e.artist,
         e.file_path,
         e.thumb_path,
         s.title AS series_title,
@@ -55,6 +56,7 @@ class MediaRepository {
       final ratio = durMs > 0 ? (posMs / durMs).clamp(0.0, 1.0) : 0.0;
       final remMs = durMs > posMs ? durMs - posMs : 0;
       final remMin = (remMs / AppSpacing.millisecondsPerMinute).ceil();
+      final artist = row['artist'] as String?;
 
       entries.add((
         updatedAt: (row['updated_at'] as int?) ?? 0,
@@ -66,6 +68,7 @@ class MediaRepository {
             row['season_number'] as int,
             row['episode_number'] as int,
             row['episode_title'] as String,
+            artist: artist,
           ),
           imagePath: _resolvePreferredImage(
             row['thumb_path'] as String?,
@@ -76,6 +79,7 @@ class MediaRepository {
           isCompleted: false,
           seriesId: row['series_id'] as int,
           filePath: row['file_path'] as String,
+          artist: artist,
         ),
       ));
     }
@@ -89,6 +93,7 @@ class MediaRepository {
         wp.updated_at,
         m.title,
         m.release_year,
+        m.artist,
         m.file_path,
         m.poster_path,
         m.thumb_path
@@ -106,6 +111,7 @@ class MediaRepository {
       final ratio = durMs > 0 ? (posMs / durMs).clamp(0.0, 1.0) : 0.0;
       final remMs = durMs > posMs ? durMs - posMs : 0;
       final remMin = (remMs / AppSpacing.millisecondsPerMinute).ceil();
+      final artist = row['artist'] as String?;
 
       entries.add((
         updatedAt: (row['updated_at'] as int?) ?? 0,
@@ -113,7 +119,10 @@ class MediaRepository {
           mediaKey: row['media_key'] as String,
           mediaType: 'movie',
           title: row['title'] as String,
-          subtitle: row['release_year'] != null ? '${row['release_year']}' : '',
+          subtitle: Formatters.formatMovieSubtitle(
+            row['release_year'] as int?,
+            artist,
+          ),
           imagePath: _resolvePreferredImage(
             row['thumb_path'] as String?,
             row['poster_path'] as String?,
@@ -123,6 +132,7 @@ class MediaRepository {
           isCompleted: false,
           seriesId: null,
           filePath: row['file_path'] as String,
+          artist: artist,
         ),
       ));
     }
@@ -140,7 +150,8 @@ class MediaRepository {
         s.title,
         s.poster_path,
         (SELECT e.file_path FROM episodes e WHERE e.series_id = s.id ORDER BY e.id ASC LIMIT 1) AS first_file,
-        (SELECT e.thumb_path FROM episodes e WHERE e.series_id = s.id AND e.thumb_path IS NOT NULL ORDER BY e.id ASC LIMIT 1) AS fallback_thumb
+        (SELECT e.thumb_path FROM episodes e WHERE e.series_id = s.id AND e.thumb_path IS NOT NULL ORDER BY e.id ASC LIMIT 1) AS fallback_thumb,
+        (SELECT e.artist FROM episodes e WHERE e.series_id = s.id AND e.artist IS NOT NULL AND e.artist != '' ORDER BY e.id ASC LIMIT 1) AS first_artist
       FROM series s
       ORDER BY s.id DESC
       LIMIT ?;
@@ -165,6 +176,7 @@ class MediaRepository {
             isCompleted: false,
             seriesId: r['id'] as int,
             filePath: r['first_file'] as String,
+            artist: r['first_artist'] as String?,
           ),
         )
         .toList();
@@ -175,6 +187,7 @@ class MediaRepository {
         m.id,
         m.title,
         m.release_year,
+        m.artist,
         m.file_path,
         m.poster_path,
         m.thumb_path,
@@ -207,7 +220,8 @@ class MediaRepository {
         s.title,
         s.poster_path,
         (SELECT e.file_path FROM episodes e WHERE e.series_id = s.id ORDER BY e.id ASC LIMIT 1) AS first_file,
-        (SELECT e.thumb_path FROM episodes e WHERE e.series_id = s.id AND e.thumb_path IS NOT NULL ORDER BY e.id ASC LIMIT 1) AS fallback_thumb
+        (SELECT e.thumb_path FROM episodes e WHERE e.series_id = s.id AND e.thumb_path IS NOT NULL ORDER BY e.id ASC LIMIT 1) AS fallback_thumb,
+        (SELECT e.artist FROM episodes e WHERE e.series_id = s.id AND e.artist IS NOT NULL AND e.artist != '' ORDER BY e.id ASC LIMIT 1) AS first_artist
       FROM series s
       WHERE s.last_watched_at IS NULL OR s.last_watched_at < ?
       ORDER BY s.id DESC
@@ -233,6 +247,7 @@ class MediaRepository {
             isCompleted: false,
             seriesId: r['id'] as int,
             filePath: r['first_file'] as String,
+            artist: r['first_artist'] as String?,
           ),
         )
         .toList();
@@ -243,6 +258,7 @@ class MediaRepository {
         m.id,
         m.title,
         m.release_year,
+        m.artist,
         m.file_path,
         m.poster_path,
         m.thumb_path,
@@ -278,7 +294,8 @@ class MediaRepository {
            ON wp.media_key = COALESCE(NULLIF(e.sync_key, ''), 'episode_' || e.id)
          WHERE e.series_id = s.id AND wp.completed = 1) AS watched_count,
         (SELECT e.file_path FROM episodes e WHERE e.series_id = s.id ORDER BY e.id ASC LIMIT 1) AS first_file,
-        (SELECT e.thumb_path FROM episodes e WHERE e.series_id = s.id AND e.thumb_path IS NOT NULL ORDER BY e.id ASC LIMIT 1) AS fallback_thumb
+        (SELECT e.thumb_path FROM episodes e WHERE e.series_id = s.id AND e.thumb_path IS NOT NULL ORDER BY e.id ASC LIMIT 1) AS fallback_thumb,
+        (SELECT e.artist FROM episodes e WHERE e.series_id = s.id AND e.artist IS NOT NULL AND e.artist != '' ORDER BY e.id ASC LIMIT 1) AS first_artist
       FROM series s
       ORDER BY s.title COLLATE NOCASE ASC;
       ''',
@@ -306,6 +323,7 @@ class MediaRepository {
         isCompleted: epCount > 0 && watchedCount >= epCount,
         seriesId: r['id'] as int,
         filePath: r['first_file'] as String,
+        artist: r['first_artist'] as String?,
       );
     }).toList();
   }
@@ -318,6 +336,7 @@ class MediaRepository {
         m.id,
         m.title,
         m.release_year,
+        m.artist,
         m.file_path,
         m.poster_path,
         m.thumb_path,
@@ -356,6 +375,7 @@ class MediaRepository {
         e.id AS episode_id,
         e.episode_number,
         e.title AS episode_title,
+        e.artist,
         e.file_path,
         e.duration_ms,
         e.thumb_path,
@@ -399,6 +419,7 @@ class MediaRepository {
           positionMs: row['position_ms'] as int,
           isCompleted: (row['completed'] as int) == 1,
           syncKey: row['sync_key'] as String?,
+          artist: row['artist'] as String?,
         ),
       );
     }
@@ -484,9 +505,8 @@ class MediaRepository {
     final remMs = (!completed && durMs > posMs) ? durMs - posMs : 0;
     final remMin = (remMs / AppSpacing.millisecondsPerMinute).ceil();
     final year = r['release_year'] as int?;
-    final subtitle = year != null
-        ? '${AppStrings.movieTypeBadge} · $year'
-        : AppStrings.movieTypeBadge;
+    final artist = r['artist'] as String?;
+    final subtitle = Formatters.formatMovieSubtitle(year, artist);
     final rawSyncKey = r['sync_key'] as String?;
     final mediaKey = (rawSyncKey != null && rawSyncKey.isNotEmpty)
         ? rawSyncKey
@@ -506,6 +526,7 @@ class MediaRepository {
       isCompleted: completed,
       seriesId: null,
       filePath: r['file_path'] as String,
+      artist: artist,
     );
   }
 

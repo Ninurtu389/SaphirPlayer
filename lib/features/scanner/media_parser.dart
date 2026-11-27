@@ -1,6 +1,7 @@
 import 'package:path/path.dart' as p;
 import '../../core/constants/app_strings.dart';
 import '../../core/storage/sync_key_utils.dart';
+import 'media_tag_reader_service.dart';
 
 class ParsedEpisode {
   const ParsedEpisode({
@@ -10,6 +11,10 @@ class ParsedEpisode {
     required this.episodeTitle,
     required this.filePath,
     this.syncKey = '',
+    this.artist,
+    this.durationMs = 0,
+    this.fileSize = 0,
+    this.modifiedAt = 0,
   });
 
   final String seriesTitle;
@@ -18,6 +23,10 @@ class ParsedEpisode {
   final String episodeTitle;
   final String filePath;
   final String syncKey;
+  final String? artist;
+  final int durationMs;
+  final int fileSize;
+  final int modifiedAt;
 }
 
 class ParsedMovie {
@@ -26,12 +35,20 @@ class ParsedMovie {
     required this.releaseYear,
     required this.filePath,
     this.syncKey = '',
+    this.artist,
+    this.durationMs = 0,
+    this.fileSize = 0,
+    this.modifiedAt = 0,
   });
 
   final String title;
   final int? releaseYear;
   final String filePath;
   final String syncKey;
+  final String? artist;
+  final int durationMs;
+  final int fileSize;
+  final int modifiedAt;
 }
 
 class MediaParser {
@@ -283,6 +300,105 @@ class MediaParser {
       filePath: filePath,
       syncKey: buildStableSyncKey('mv', filePath, rootFolderPath),
     );
+  }
+
+  static ParsedEpisode? parseEpisodeWithTags(
+    String filePath,
+    String rootFolderPath,
+    EmbeddedMediaTags? tags, {
+    required int fileSize,
+    required int modifiedAt,
+  }) {
+    final fromPath = parseEpisode(filePath, rootFolderPath);
+    final tagSeries = _nonEmpty(tags?.seriesTitle);
+    final tagTitle = _nonEmpty(tags?.title);
+    final tagArtist = _nonEmpty(tags?.artist);
+    final tagSeason = tags?.seasonNumber;
+    final tagEpisode = tags?.episodeNumber;
+    final tagDurationMs =
+        (tags?.durationMs != null && tags!.durationMs! > 0) ? tags.durationMs! : 0;
+
+    final isTagEpisode = tagEpisode != null &&
+        tagEpisode > 0 &&
+        (tagSeries != null || tagSeason != null);
+
+    if (fromPath == null && !isTagEpisode) {
+      return null;
+    }
+
+    if (fromPath != null) {
+      return ParsedEpisode(
+        seriesTitle: tagSeries ?? fromPath.seriesTitle,
+        seasonNumber: tagSeason ?? fromPath.seasonNumber,
+        episodeNumber: (tagEpisode != null && tagEpisode > 0)
+            ? tagEpisode
+            : fromPath.episodeNumber,
+        episodeTitle: tagTitle ?? fromPath.episodeTitle,
+        filePath: filePath,
+        syncKey: fromPath.syncKey,
+        artist: tagArtist,
+        durationMs: tagDurationMs,
+        fileSize: fileSize,
+        modifiedAt: modifiedAt,
+      );
+    }
+
+    final baseName = p.basenameWithoutExtension(filePath);
+    final relPath = p.relative(filePath, from: rootFolderPath);
+    final segments = p.split(relPath);
+    final folderSeason = _findSeasonFolder(segments);
+    final resolvedSeason = tagSeason ?? folderSeason?.$2 ?? 1;
+    final resolvedEpisode = tagEpisode!;
+    final resolvedSeries = tagSeries ??
+        _resolveSeriesTitle(segments, baseName, null, folderSeason?.$1);
+    final cleanedBase = _cleanTitle(baseName);
+    final resolvedTitle = tagTitle ??
+        (cleanedBase.isNotEmpty
+            ? cleanedBase
+            : '${AppStrings.episodeFallbackPrefix} $resolvedEpisode');
+
+    return ParsedEpisode(
+      seriesTitle: resolvedSeries,
+      seasonNumber: resolvedSeason,
+      episodeNumber: resolvedEpisode,
+      episodeTitle: resolvedTitle,
+      filePath: filePath,
+      syncKey: buildStableSyncKey('ep', filePath, rootFolderPath),
+      artist: tagArtist,
+      durationMs: tagDurationMs,
+      fileSize: fileSize,
+      modifiedAt: modifiedAt,
+    );
+  }
+
+  static ParsedMovie parseMovieWithTags(
+    String filePath,
+    String rootFolderPath,
+    EmbeddedMediaTags? tags, {
+    required int fileSize,
+    required int modifiedAt,
+  }) {
+    final fromPath = parseMovie(filePath, rootFolderPath);
+    final tagTitle = _nonEmpty(tags?.title);
+    final tagArtist = _nonEmpty(tags?.artist);
+    final tagDurationMs =
+        (tags?.durationMs != null && tags!.durationMs! > 0) ? tags.durationMs! : 0;
+
+    return ParsedMovie(
+      title: tagTitle ?? fromPath.title,
+      releaseYear: tags?.releaseYear ?? fromPath.releaseYear,
+      filePath: fromPath.filePath,
+      syncKey: fromPath.syncKey,
+      artist: tagArtist,
+      durationMs: tagDurationMs,
+      fileSize: fileSize,
+      modifiedAt: modifiedAt,
+    );
+  }
+
+  static String? _nonEmpty(String? value) {
+    final trimmed = value?.trim();
+    return (trimmed != null && trimmed.isNotEmpty) ? trimmed : null;
   }
 
   static String _resolveSeriesTitle(

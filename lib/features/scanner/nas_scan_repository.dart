@@ -3,6 +3,72 @@ import 'package:path/path.dart' as p;
 import '../../core/storage/database_service.dart';
 import 'media_parser.dart';
 
+class CachedFileMeta {
+  const CachedFileMeta({
+    required this.isEpisode,
+    required this.filePath,
+    required this.fileSize,
+    required this.modifiedAt,
+    required this.title,
+    required this.artist,
+    required this.durationMs,
+    required this.syncKey,
+    this.seriesTitle,
+    this.seriesSummary,
+    this.seasonNumber,
+    this.episodeNumber,
+    this.releaseYear,
+  });
+
+  final bool isEpisode;
+  final String filePath;
+  final int fileSize;
+  final int modifiedAt;
+  final String title;
+  final String? artist;
+  final int durationMs;
+  final String syncKey;
+  final String? seriesTitle;
+  final String? seriesSummary;
+  final int? seasonNumber;
+  final int? episodeNumber;
+  final int? releaseYear;
+
+  ParsedEpisode? toParsedEpisode() {
+    if (!isEpisode ||
+        seriesTitle == null ||
+        seasonNumber == null ||
+        episodeNumber == null) {
+      return null;
+    }
+    return ParsedEpisode(
+      seriesTitle: seriesTitle!,
+      seasonNumber: seasonNumber!,
+      episodeNumber: episodeNumber!,
+      episodeTitle: title,
+      filePath: filePath,
+      syncKey: syncKey,
+      artist: artist,
+      durationMs: durationMs,
+      fileSize: fileSize,
+      modifiedAt: modifiedAt,
+    );
+  }
+
+  ParsedMovie toParsedMovie() {
+    return ParsedMovie(
+      title: title,
+      releaseYear: releaseYear,
+      filePath: filePath,
+      syncKey: syncKey,
+      artist: artist,
+      durationMs: durationMs,
+      fileSize: fileSize,
+      modifiedAt: modifiedAt,
+    );
+  }
+}
+
 class ScannedSeriesData {
   const ScannedSeriesData({
     required this.title,
@@ -26,6 +92,10 @@ class ScannedMovieData {
     required this.filePath,
     required this.posterPath,
     required this.syncKey,
+    this.artist,
+    this.durationMs = 0,
+    this.fileSize = 0,
+    this.modifiedAt = 0,
   });
 
   final String title;
@@ -33,6 +103,10 @@ class ScannedMovieData {
   final String filePath;
   final String? posterPath;
   final String syncKey;
+  final String? artist;
+  final int durationMs;
+  final int fileSize;
+  final int modifiedAt;
 }
 
 class ScanOutput {
@@ -59,6 +133,79 @@ class NasScanRepository {
     final seriesRow = db.select('SELECT COUNT(*) AS cnt FROM series;').first;
     final moviesRow = db.select('SELECT COUNT(*) AS cnt FROM movies;').first;
     return (seriesRow['cnt'] as int, moviesRow['cnt'] as int);
+  }
+
+  Map<String, CachedFileMeta> loadKnownFileMetadata() {
+    final db = _databaseService.instance;
+    final map = <String, CachedFileMeta>{};
+
+    final epRows = db.select(
+      '''
+      SELECT
+        e.file_path,
+        e.file_size,
+        e.modified_at,
+        e.title,
+        e.artist,
+        e.duration_ms,
+        e.sync_key,
+        e.episode_number,
+        sn.season_number,
+        s.title AS series_title,
+        s.summary AS series_summary
+      FROM episodes e
+      INNER JOIN series s ON e.series_id = s.id
+      INNER JOIN seasons sn ON e.season_id = sn.id;
+      ''',
+    );
+    for (final row in epRows) {
+      final pathStr = row['file_path'] as String;
+      map[pathStr] = CachedFileMeta(
+        isEpisode: true,
+        filePath: pathStr,
+        fileSize: (row['file_size'] as int?) ?? 0,
+        modifiedAt: (row['modified_at'] as int?) ?? 0,
+        title: row['title'] as String,
+        artist: row['artist'] as String?,
+        durationMs: (row['duration_ms'] as int?) ?? 0,
+        syncKey: (row['sync_key'] as String?) ?? '',
+        seriesTitle: row['series_title'] as String?,
+        seriesSummary: row['series_summary'] as String?,
+        seasonNumber: row['season_number'] as int?,
+        episodeNumber: row['episode_number'] as int?,
+      );
+    }
+
+    final mvRows = db.select(
+      '''
+      SELECT
+        file_path,
+        file_size,
+        modified_at,
+        title,
+        artist,
+        duration_ms,
+        sync_key,
+        release_year
+      FROM movies;
+      ''',
+    );
+    for (final row in mvRows) {
+      final pathStr = row['file_path'] as String;
+      map[pathStr] = CachedFileMeta(
+        isEpisode: false,
+        filePath: pathStr,
+        fileSize: (row['file_size'] as int?) ?? 0,
+        modifiedAt: (row['modified_at'] as int?) ?? 0,
+        title: row['title'] as String,
+        artist: row['artist'] as String?,
+        durationMs: (row['duration_ms'] as int?) ?? 0,
+        syncKey: (row['sync_key'] as String?) ?? '',
+        releaseYear: row['release_year'] as int?,
+      );
+    }
+
+    return map;
   }
 
   List<String> applyDiff(ScanOutput output) {
@@ -108,45 +255,42 @@ class NasScanRepository {
           ).first;
           final seasonId = seasonRow['id'] as int;
 
-          final existingEp = db.select(
-            'SELECT id FROM episodes WHERE file_path = ? LIMIT 1;',
-            [ep.filePath],
-          );
-
           final syncKey = ep.syncKey.isEmpty ? null : ep.syncKey;
 
-          if (existingEp.isEmpty) {
-            db.execute(
-              '''
-              INSERT INTO episodes (series_id, season_id, episode_number, title, file_path, sync_key)
-              VALUES (?, ?, ?, ?, ?, ?);
-              ''',
-              [
-                seriesId,
-                seasonId,
-                ep.episodeNumber,
-                ep.episodeTitle,
-                ep.filePath,
-                syncKey,
-              ],
-            );
-          } else {
-            db.execute(
-              '''
-              UPDATE episodes
-              SET series_id = ?, season_id = ?, episode_number = ?, title = ?, sync_key = COALESCE(?, sync_key)
-              WHERE file_path = ?;
-              ''',
-              [
-                seriesId,
-                seasonId,
-                ep.episodeNumber,
-                ep.episodeTitle,
-                syncKey,
-                ep.filePath,
-              ],
-            );
-          }
+          db.execute(
+            '''
+            INSERT INTO episodes (
+              series_id, season_id, episode_number, title, file_path,
+              duration_ms, sync_key, artist, file_size, modified_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(file_path) DO UPDATE SET
+              series_id = excluded.series_id,
+              season_id = excluded.season_id,
+              episode_number = excluded.episode_number,
+              title = excluded.title,
+              duration_ms = CASE
+                WHEN excluded.duration_ms > 0 THEN excluded.duration_ms
+                ELSE episodes.duration_ms
+              END,
+              sync_key = COALESCE(excluded.sync_key, episodes.sync_key),
+              artist = excluded.artist,
+              file_size = excluded.file_size,
+              modified_at = excluded.modified_at;
+            ''',
+            [
+              seriesId,
+              seasonId,
+              ep.episodeNumber,
+              ep.episodeTitle,
+              ep.filePath,
+              ep.durationMs,
+              syncKey,
+              ep.artist,
+              ep.fileSize,
+              ep.modifiedAt,
+            ],
+          );
         }
       }
 
@@ -156,20 +300,34 @@ class NasScanRepository {
 
         db.execute(
           '''
-          INSERT INTO movies (title, release_year, file_path, poster_path, sync_key)
-          VALUES (?, ?, ?, ?, ?)
+          INSERT INTO movies (
+            title, release_year, file_path, poster_path,
+            duration_ms, sync_key, artist, file_size, modified_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(file_path) DO UPDATE SET
             title = excluded.title,
             release_year = excluded.release_year,
             poster_path = COALESCE(excluded.poster_path, movies.poster_path),
-            sync_key = COALESCE(excluded.sync_key, movies.sync_key);
+            duration_ms = CASE
+              WHEN excluded.duration_ms > 0 THEN excluded.duration_ms
+              ELSE movies.duration_ms
+            END,
+            sync_key = COALESCE(excluded.sync_key, movies.sync_key),
+            artist = excluded.artist,
+            file_size = excluded.file_size,
+            modified_at = excluded.modified_at;
           ''',
           [
             movie.title,
             movie.releaseYear,
             movie.filePath,
             movie.posterPath,
+            movie.durationMs,
             syncKey,
+            movie.artist,
+            movie.fileSize,
+            movie.modifiedAt,
           ],
         );
       }

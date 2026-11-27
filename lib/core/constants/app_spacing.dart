@@ -89,6 +89,9 @@ class AppSpacing {
   static const int staleDaysDefault = 60;
   static const double thumbnailSeekRatio = 0.15;
   static const int ffmpegTimeoutSeconds = 10;
+  static const int ffprobeTimeoutSeconds = 5;
+  static const int mkvTagHeaderMaxScanBytes = 262144;
+  static const int executableProbeTimeoutSeconds = 2;
   static const int thumbnailShortVideoSeekSeconds = 1;
   static const int thumbnailShortVideoThresholdSeconds = 30;
   static const int thumbnailSeekWaitTimeoutMs = 2500;

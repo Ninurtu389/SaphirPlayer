@@ -50,9 +50,56 @@ class Formatters {
   static String formatEpisodeSubtitle(
     int seasonNumber,
     int episodeNumber,
-    String title,
-  ) {
-    return 'S${seasonNumber}E$episodeNumber · $title';
+    String title, {
+    String? artist,
+  }) {
+    final base =
+        'S${seasonNumber}E$episodeNumber${AppStrings.metadataSeparator}$title';
+    final cleanArtist = artist?.trim();
+    if (cleanArtist != null && cleanArtist.isNotEmpty) {
+      return '$base${AppStrings.metadataSeparator}$cleanArtist';
+    }
+    return base;
+  }
+
+  static String formatMovieSubtitle(int? releaseYear, String? artist) {
+    final parts = <String>[AppStrings.movieTypeBadge];
+    if (releaseYear != null) {
+      parts.add('$releaseYear');
+    }
+    final cleanArtist = artist?.trim();
+    if (cleanArtist != null && cleanArtist.isNotEmpty) {
+      parts.add(cleanArtist);
+    }
+    return parts.join(AppStrings.metadataSeparator);
+  }
+
+  static String formatEpisodeRowMeta(int durationMs, String? artist) {
+    final parts = <String>[];
+    if (durationMs > 0) {
+      final minutes = (durationMs / AppSpacing.millisecondsPerMinute).round();
+      parts.add('$minutes ${AppStrings.statsMinutesShort}');
+    }
+    final cleanArtist = artist?.trim();
+    if (cleanArtist != null && cleanArtist.isNotEmpty) {
+      parts.add(cleanArtist);
+    }
+    return parts.join(AppStrings.metadataSeparator);
+  }
+
+  static String formatPlayerHudSubtitle(String subtitle, String? artist) {
+    final cleanSub = subtitle.trim();
+    final cleanArtist = artist?.trim() ?? '';
+    if (cleanArtist.isEmpty) {
+      return cleanSub;
+    }
+    if (cleanSub.isEmpty) {
+      return cleanArtist;
+    }
+    if (cleanSub.toLowerCase().contains(cleanArtist.toLowerCase())) {
+      return cleanSub;
+    }
+    return '$cleanSub${AppStrings.metadataSeparator}$cleanArtist';
   }
 
   static String episodeMediaKey(int episodeId) => 'episode_$episodeId';

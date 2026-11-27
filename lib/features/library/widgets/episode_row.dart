@@ -161,7 +161,8 @@ class _EpisodeInfo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final durationText = episode.formattedDuration;
+    final metaText =
+        Formatters.formatEpisodeRowMeta(episode.durationMs, episode.artist);
     return InkWell(
       onTap: onTap,
       child: Column(
@@ -179,10 +180,14 @@ class _EpisodeInfo extends StatelessWidget {
           const SizedBox(height: AppSpacing.xxs),
           Row(
             children: [
-              if (durationText.isNotEmpty) ...[
-                Text(
-                  durationText,
-                  style: Theme.of(context).textTheme.bodySmall,
+              if (metaText.isNotEmpty) ...[
+                Flexible(
+                  child: Text(
+                    metaText,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
                 ),
                 if (episode.isCompleted) const SizedBox(width: AppSpacing.sm),
               ],

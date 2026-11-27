@@ -10,6 +10,7 @@ class PlaybackQueueEntry {
     required this.filePath,
     required this.seriesId,
     required this.startPositionMs,
+    this.artist,
   });
 
   final String mediaKey;
@@ -19,6 +20,7 @@ class PlaybackQueueEntry {
   final String filePath;
   final int? seriesId;
   final int startPositionMs;
+  final String? artist;
 }
 
 class PlaybackSession {
@@ -49,6 +51,7 @@ class PlaybackSession {
             filePath: ep.filePath,
             seriesId: ep.seriesId,
             startPositionMs: ep.isCompleted ? 0 : ep.positionMs,
+            artist: ep.artist,
           ),
         )
         .toList();

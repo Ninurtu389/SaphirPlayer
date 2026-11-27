@@ -6,6 +6,7 @@ import '../../core/storage/database_service.dart';
 import '../../core/storage/portable_paths.dart';
 import '../library/metadata_reader.dart';
 import 'media_parser.dart';
+import 'media_tag_reader_service.dart';
 import 'nas_scan_repository.dart';
 import 'thumbnail_generator_service.dart';
 
@@ -24,17 +25,25 @@ class ScanResult {
 }
 
 class _ScanPayload {
-  const _ScanPayload({required this.rootPaths});
+  const _ScanPayload({
+    required this.rootPaths,
+    required this.knownMetadata,
+  });
 
   final List<String> rootPaths;
+  final Map<String, CachedFileMeta> knownMetadata;
 }
 
 class NasScannerService {
-  NasScannerService(this._databaseService)
-      : _repository = NasScanRepository(_databaseService);
+  NasScannerService(
+    this._databaseService, {
+    Future<EmbeddedMediaTags?> Function(String filePath)? tagReader,
+  })  : _repository = NasScanRepository(_databaseService),
+        _tagReader = tagReader;
 
   final DatabaseService _databaseService;
   final NasScanRepository _repository;
+  final Future<EmbeddedMediaTags?> Function(String filePath)? _tagReader;
   bool _isPlaybackActive = false;
 
   bool get isPlaybackActive => _isPlaybackActive;
@@ -73,9 +82,14 @@ class NasScannerService {
       );
     }
 
-    final output = await Isolate.run(
-      () => _runScanInIsolate(_ScanPayload(rootPaths: cleanedPaths)),
+    final knownMetadata = _repository.loadKnownFileMetadata();
+    final payload = _ScanPayload(
+      rootPaths: cleanedPaths,
+      knownMetadata: knownMetadata,
     );
+    final output = _tagReader == null
+        ? await Isolate.run(() => _runScanInIsolate(payload))
+        : await _runScan(payload, tagReader: _tagReader);
 
     if (_isPlaybackActive) {
       final counts = _repository.currentCounts();
@@ -257,7 +271,14 @@ class NasScannerService {
     }
   }
 
-  static ScanOutput _runScanInIsolate(_ScanPayload payload) {
+  static Future<ScanOutput> _runScanInIsolate(_ScanPayload payload) {
+    return _runScan(payload, tagReader: MediaTagReaderService.readTags);
+  }
+
+  static Future<ScanOutput> _runScan(
+    _ScanPayload payload, {
+    required Future<EmbeddedMediaTags?> Function(String filePath) tagReader,
+  }) async {
     final reachableRoots = <String>[];
     final episodesBySeries = <String, List<ParsedEpisode>>{};
     final posterBySeries = <String, String>{};
@@ -284,7 +305,39 @@ class NasScannerService {
           continue;
         }
 
-        final episode = MediaParser.parseEpisode(filePath, rootPath);
+        final FileStat stat;
+        try {
+          stat = entity.statSync();
+        } on FileSystemException {
+          continue;
+        }
+        final fileSize = stat.size;
+        final modifiedAt = stat.modified.millisecondsSinceEpoch;
+        final cached = payload.knownMetadata[filePath];
+        final isUnchanged = cached != null &&
+            cached.modifiedAt > 0 &&
+            cached.fileSize == fileSize &&
+            cached.modifiedAt == modifiedAt;
+
+        ParsedEpisode? episode;
+        String? tagSummary;
+        EmbeddedMediaTags? tags;
+
+        if (isUnchanged) {
+          episode = cached.toParsedEpisode();
+          tagSummary = episode != null ? cached.seriesSummary : null;
+        } else {
+          tags = await tagReader(filePath);
+          episode = MediaParser.parseEpisodeWithTags(
+            filePath,
+            rootPath,
+            tags,
+            fileSize: fileSize,
+            modifiedAt: modifiedAt,
+          );
+          tagSummary = tags?.summary;
+        }
+
         if (episode != null) {
           final resolved = _resolveSeriesRoot(
             filePath,
@@ -303,23 +356,37 @@ class NasScannerService {
                 NasScanRepository.findLocalPosterNearFile(filePath) ??
                 '',
           );
-          summaryBySeries.putIfAbsent(
-            key,
-            () => resolved.metaDir != null
+          final existingSummary = summaryBySeries[key];
+          if (existingSummary == null || existingSummary.isEmpty) {
+            final fileSummary = resolved.metaDir != null
                 ? MetadataReader.readSeriesSummary(resolved.metaDir!)
-                : null,
-          );
+                : null;
+            summaryBySeries[key] =
+                (fileSummary != null && fileSummary.isNotEmpty)
+                    ? fileSummary
+                    : tagSummary;
+          }
         } else {
-          final parsed = MediaParser.parseMovie(filePath, rootPath);
-          final posterPath =
-              NasScanRepository.findLocalPosterNearFile(filePath);
+          final parsed = isUnchanged
+              ? cached.toParsedMovie()
+              : MediaParser.parseMovieWithTags(
+                  filePath,
+                  rootPath,
+                  tags,
+                  fileSize: fileSize,
+                  modifiedAt: modifiedAt,
+                );
           movies.add(
             ScannedMovieData(
               title: parsed.title,
               releaseYear: parsed.releaseYear,
               filePath: parsed.filePath,
-              posterPath: posterPath,
+              posterPath: NasScanRepository.findLocalPosterNearFile(filePath),
               syncKey: parsed.syncKey,
+              artist: parsed.artist,
+              durationMs: parsed.durationMs,
+              fileSize: parsed.fileSize,
+              modifiedAt: parsed.modifiedAt,
             ),
           );
         }

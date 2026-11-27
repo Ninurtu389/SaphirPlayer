@@ -58,7 +58,19 @@ void main() {
       expect(fk, 1);
 
       final version = db.select('PRAGMA user_version;').first.values.first;
-      expect(version, 3);
+      expect(version, 4);
+
+      final epCols = db
+          .select('PRAGMA table_info(episodes);')
+          .map((r) => r['name'] as String)
+          .toSet();
+      expect(epCols, containsAll(['artist', 'file_size', 'modified_at']));
+
+      final mvCols = db
+          .select('PRAGMA table_info(movies);')
+          .map((r) => r['name'] as String)
+          .toSet();
+      expect(mvCols, containsAll(['artist', 'file_size', 'modified_at']));
     });
 
     test('throws StateError when accessed before open()', () {

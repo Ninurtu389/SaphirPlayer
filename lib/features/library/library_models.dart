@@ -18,6 +18,7 @@ class MediaCardItem {
     required this.isCompleted,
     required this.seriesId,
     required this.filePath,
+    this.artist,
   });
 
   final String mediaKey;
@@ -30,6 +31,7 @@ class MediaCardItem {
   final bool isCompleted;
   final int? seriesId;
   final String filePath;
+  final String? artist;
 
   String get monogram {
     final words = title
@@ -73,6 +75,7 @@ class EpisodeEntry {
     required this.positionMs,
     required this.isCompleted,
     this.syncKey,
+    this.artist,
   });
 
   final int id;
@@ -87,6 +90,7 @@ class EpisodeEntry {
   final int positionMs;
   final bool isCompleted;
   final String? syncKey;
+  final String? artist;
 
   String get mediaKey =>
       (syncKey != null && syncKey!.isNotEmpty)

@@ -50,7 +50,8 @@ class LibraryController extends ChangeNotifier {
         .where(
           (item) =>
               item.title.toLowerCase().contains(_searchQuery) ||
-              item.subtitle.toLowerCase().contains(_searchQuery),
+              item.subtitle.toLowerCase().contains(_searchQuery) ||
+              (item.artist ?? '').toLowerCase().contains(_searchQuery),
         )
         .toList();
   }

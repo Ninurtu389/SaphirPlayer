@@ -118,6 +118,8 @@ class AppStrings {
       'Keine passenden Serien oder Filme gefunden.';
   static const String seriesTypeBadge = 'Serie';
   static const String movieTypeBadge = 'Film';
+  static const String artistLabel = 'Interpret';
+  static const String metadataSeparator = ' · ';
   static const String playNowButton = 'Abspielen';
 
   static const String autoNextTitle = 'Nächste Folge';

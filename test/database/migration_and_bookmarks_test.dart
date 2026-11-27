@@ -115,7 +115,7 @@ void main() {
       addTearDown(service.close);
 
       final db = service.instance;
-      expect(db.select('PRAGMA user_version;').first.values.first, 3);
+      expect(db.select('PRAGMA user_version;').first.values.first, 4);
 
       final cols = db
           .select('PRAGMA table_info(series_preferences);')
@@ -155,7 +155,7 @@ void main() {
       await service.open(dbPath: v1Path);
       expect(
         service.instance.select('PRAGMA user_version;').first.values.first,
-        3,
+        4,
       );
     });
 
@@ -250,15 +250,176 @@ void main() {
         addTearDown(service.close);
 
         final db = service.instance;
-        expect(db.select('PRAGMA user_version;').first.values.first, 3);
+        expect(db.select('PRAGMA user_version;').first.values.first, 4);
         final movieCols = db
             .select('PRAGMA table_info(movies);')
             .map((r) => r['name'] as String)
             .toSet();
-        expect(movieCols, containsAll(['sync_key', 'thumb_status']));
+        expect(
+          movieCols,
+          containsAll(['sync_key', 'thumb_status', 'artist', 'file_size', 'modified_at']),
+        );
         final mv = db.select('SELECT sync_key FROM movies WHERE id = 1;').first;
         expect(mv['sync_key'], isNotNull);
       }
+    });
+
+    test('migrates v3 schema to v4 preserving watch_progress, bookmarks, and preferences',
+        () async {
+      final env = await TestEnv.create();
+      addTearDown(env.dispose);
+
+      final v3Path = p.join(env.tempRoot.path, 'legacy_v3.db');
+      final raw = sqlite3.open(v3Path);
+      raw.execute('''
+        CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE series (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          title TEXT NOT NULL,
+          folder_path TEXT NOT NULL UNIQUE,
+          poster_path TEXT,
+          summary TEXT,
+          last_watched_at INTEGER
+        );
+        CREATE TABLE seasons (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          series_id INTEGER NOT NULL,
+          season_number INTEGER NOT NULL,
+          folder_path TEXT NOT NULL
+        );
+        CREATE TABLE episodes (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          series_id INTEGER NOT NULL,
+          season_id INTEGER NOT NULL,
+          episode_number INTEGER NOT NULL,
+          title TEXT NOT NULL,
+          file_path TEXT NOT NULL UNIQUE,
+          duration_ms INTEGER NOT NULL DEFAULT 0,
+          thumb_path TEXT,
+          sync_key TEXT,
+          thumb_status TEXT NOT NULL DEFAULT 'pending'
+        );
+        CREATE TABLE movies (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          title TEXT NOT NULL,
+          release_year INTEGER,
+          file_path TEXT NOT NULL UNIQUE,
+          poster_path TEXT,
+          thumb_path TEXT,
+          duration_ms INTEGER NOT NULL DEFAULT 0,
+          last_watched_at INTEGER,
+          sync_key TEXT,
+          thumb_status TEXT NOT NULL DEFAULT 'pending'
+        );
+        CREATE TABLE watch_progress (
+          media_key TEXT PRIMARY KEY,
+          media_type TEXT NOT NULL,
+          position_ms INTEGER NOT NULL DEFAULT 0,
+          duration_ms INTEGER NOT NULL DEFAULT 0,
+          completed INTEGER NOT NULL DEFAULT 0,
+          updated_at INTEGER NOT NULL,
+          source_device TEXT NOT NULL
+        );
+        CREATE TABLE series_preferences (
+          series_id INTEGER PRIMARY KEY,
+          audio_track TEXT,
+          subtitle_track TEXT,
+          intro_skip_seconds INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE media_bookmarks (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          media_key TEXT NOT NULL,
+          position_ms INTEGER NOT NULL,
+          label TEXT NOT NULL DEFAULT '',
+          created_at INTEGER NOT NULL
+        );
+        CREATE TABLE watch_history (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          media_key TEXT NOT NULL,
+          media_type TEXT NOT NULL,
+          title TEXT NOT NULL,
+          series_id INTEGER,
+          watched_ms INTEGER NOT NULL DEFAULT 0,
+          started_at INTEGER NOT NULL,
+          ended_at INTEGER NOT NULL,
+          day_key TEXT NOT NULL,
+          weekday INTEGER NOT NULL,
+          source_device TEXT NOT NULL
+        );
+      ''');
+      raw.execute(
+        "INSERT INTO series (id, title, folder_path) VALUES (1, 'Andor', 'D:\\NAS\\Andor');",
+      );
+      raw.execute(
+        "INSERT INTO seasons (id, series_id, season_number, folder_path) VALUES (1, 1, 1, 'D:\\NAS\\Andor\\S1');",
+      );
+      raw.execute(
+        "INSERT INTO episodes (id, series_id, season_id, episode_number, title, file_path, duration_ms, sync_key) VALUES (1, 1, 1, 1, 'Kassa', 'D:\\NAS\\Andor\\S01E01.mkv', 2400000, 'ep_andor_1');",
+      );
+      raw.execute(
+        "INSERT INTO movies (id, title, release_year, file_path, duration_ms, sync_key) VALUES (1, 'Arrival', 2016, 'D:\\NAS\\Arrival.mkv', 6900000, 'mv_arrival');",
+      );
+      raw.execute(
+        "INSERT INTO watch_progress (media_key, media_type, position_ms, duration_ms, completed, updated_at, source_device) VALUES ('ep_andor_1', 'episode', 600000, 2400000, 0, 5000, 'Laptop');",
+      );
+      raw.execute(
+        "INSERT INTO media_bookmarks (media_key, position_ms, label, created_at) VALUES ('ep_andor_1', 300000, 'Intro Ende', 5000);",
+      );
+      raw.execute(
+        "INSERT INTO series_preferences (series_id, audio_track, subtitle_track, intro_skip_seconds) VALUES (1, 'eng', 'deu', 85);",
+      );
+      raw.execute('PRAGMA user_version = 3;');
+      raw.dispose();
+
+      final service = DatabaseService();
+      await service.open(dbPath: v3Path);
+      addTearDown(service.close);
+
+      final db = service.instance;
+      expect(db.select('PRAGMA user_version;').first.values.first, 4);
+
+      final epCols = db
+          .select('PRAGMA table_info(episodes);')
+          .map((r) => r['name'] as String)
+          .toSet();
+      final mvCols = db
+          .select('PRAGMA table_info(movies);')
+          .map((r) => r['name'] as String)
+          .toSet();
+      expect(epCols, containsAll(['artist', 'file_size', 'modified_at']));
+      expect(mvCols, containsAll(['artist', 'file_size', 'modified_at']));
+
+      final ep = db
+          .select('SELECT title, artist, file_size, modified_at FROM episodes WHERE id = 1;')
+          .first;
+      expect(ep['title'], 'Kassa');
+      expect(ep['artist'], isNull);
+      expect(ep['file_size'], 0);
+      expect(ep['modified_at'], 0);
+
+      final mv = db
+          .select('SELECT title, artist, file_size, modified_at FROM movies WHERE id = 1;')
+          .first;
+      expect(mv['title'], 'Arrival');
+      expect(mv['artist'], isNull);
+      expect(mv['file_size'], 0);
+      expect(mv['modified_at'], 0);
+
+      final wp = db.select("SELECT position_ms FROM watch_progress WHERE media_key = 'ep_andor_1';").first;
+      expect(wp['position_ms'], 600000);
+
+      final bm = db.select("SELECT label, position_ms FROM media_bookmarks WHERE media_key = 'ep_andor_1';").first;
+      expect(bm['label'], 'Intro Ende');
+      expect(bm['position_ms'], 300000);
+
+      final pref = db.select('SELECT intro_skip_seconds, audio_track FROM series_preferences WHERE series_id = 1;').first;
+      expect(pref['intro_skip_seconds'], 85);
+      expect(pref['audio_track'], 'eng');
+
+      // Re-opening must be idempotent
+      service.close();
+      await service.open(dbPath: v3Path);
+      expect(service.instance.select('PRAGMA user_version;').first.values.first, 4);
     });
   });
 
