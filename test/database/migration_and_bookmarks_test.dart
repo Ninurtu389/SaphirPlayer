@@ -15,7 +15,8 @@ import '../helpers/test_fixtures.dart';
 
 void main() {
   group('Database v1/v2/v0 -> v3 migration & idempotency', () {
-    test('migrates v1 schema to v3 preserving existing data and backfilling sync_key',
+    test(
+        'migrates v1 schema to v3 preserving existing data and backfilling sync_key',
         () async {
       final env = await TestEnv.create();
       addTearDown(env.dispose);
@@ -115,7 +116,7 @@ void main() {
       addTearDown(service.close);
 
       final db = service.instance;
-      expect(db.select('PRAGMA user_version;').first.values.first, 4);
+      expect(db.select('PRAGMA user_version;').first.values.first, 6);
 
       final cols = db
           .select('PRAGMA table_info(series_preferences);')
@@ -123,16 +124,25 @@ void main() {
           .toSet();
       expect(cols, contains('intro_skip_seconds'));
 
-      final epRow = db.select('SELECT sync_key, thumb_status FROM episodes WHERE id = 1;').first;
-      final expectedEpKey = SyncKeyUtils.buildStableSyncKey('ep', r'D:\NAS\Dark\S01E01.mkv', r'D:\NAS');
+      final epRow = db
+          .select('SELECT sync_key, thumb_status FROM episodes WHERE id = 1;')
+          .first;
+      final expectedEpKey = SyncKeyUtils.buildStableSyncKey(
+          'ep', r'D:\NAS\Dark\S01E01.mkv', r'D:\NAS');
       expect(epRow['sync_key'], expectedEpKey);
       expect(epRow['thumb_status'], 'ready');
 
-      final mvRow = db.select('SELECT sync_key, thumb_status FROM movies WHERE id = 1;').first;
-      expect(mvRow['sync_key'], SyncKeyUtils.buildStableSyncKey('mv', r'D:\NAS\Arrival.mkv', r'D:\NAS'));
+      final mvRow = db
+          .select('SELECT sync_key, thumb_status FROM movies WHERE id = 1;')
+          .first;
+      expect(
+          mvRow['sync_key'],
+          SyncKeyUtils.buildStableSyncKey(
+              'mv', r'D:\NAS\Arrival.mkv', r'D:\NAS'));
       expect(mvRow['thumb_status'], 'pending');
 
-      final wpRows = db.select('SELECT media_key, position_ms FROM watch_progress;');
+      final wpRows =
+          db.select('SELECT media_key, position_ms FROM watch_progress;');
       expect(wpRows.length, 1);
       expect(wpRows.first['media_key'], expectedEpKey);
       expect(wpRows.first['position_ms'], 45000);
@@ -155,11 +165,12 @@ void main() {
       await service.open(dbPath: v1Path);
       expect(
         service.instance.select('PRAGMA user_version;').first.values.first,
-        4,
+        6,
       );
     });
 
-    test('migrates v2 schema to v3 and repairs user_version == 0 with existing tables',
+    test(
+        'migrates v2 schema to v3 and repairs user_version == 0 with existing tables',
         () async {
       final env = await TestEnv.create();
       addTearDown(env.dispose);
@@ -250,21 +261,28 @@ void main() {
         addTearDown(service.close);
 
         final db = service.instance;
-        expect(db.select('PRAGMA user_version;').first.values.first, 4);
+        expect(db.select('PRAGMA user_version;').first.values.first, 6);
         final movieCols = db
             .select('PRAGMA table_info(movies);')
             .map((r) => r['name'] as String)
             .toSet();
         expect(
           movieCols,
-          containsAll(['sync_key', 'thumb_status', 'artist', 'file_size', 'modified_at']),
+          containsAll([
+            'sync_key',
+            'thumb_status',
+            'artist',
+            'file_size',
+            'modified_at'
+          ]),
         );
         final mv = db.select('SELECT sync_key FROM movies WHERE id = 1;').first;
         expect(mv['sync_key'], isNotNull);
       }
     });
 
-    test('migrates v3 schema to v4 preserving watch_progress, bookmarks, and preferences',
+    test(
+        'migrates v3 schema to v4 preserving watch_progress, bookmarks, and preferences',
         () async {
       final env = await TestEnv.create();
       addTearDown(env.dispose);
@@ -376,7 +394,7 @@ void main() {
       addTearDown(service.close);
 
       final db = service.instance;
-      expect(db.select('PRAGMA user_version;').first.values.first, 4);
+      expect(db.select('PRAGMA user_version;').first.values.first, 6);
 
       final epCols = db
           .select('PRAGMA table_info(episodes);')
@@ -390,41 +408,147 @@ void main() {
       expect(mvCols, containsAll(['artist', 'file_size', 'modified_at']));
 
       final ep = db
-          .select('SELECT title, artist, file_size, modified_at FROM episodes WHERE id = 1;')
+          .select(
+              'SELECT title, artist, file_size, modified_at, sync_key FROM episodes WHERE id = 1;')
           .first;
       expect(ep['title'], 'Kassa');
       expect(ep['artist'], isNull);
       expect(ep['file_size'], 0);
       expect(ep['modified_at'], 0);
+      final migratedEpKey = ep['sync_key'] as String;
+      expect(SyncKeyUtils.isV2SyncKey(migratedEpKey), isTrue);
 
       final mv = db
-          .select('SELECT title, artist, file_size, modified_at FROM movies WHERE id = 1;')
+          .select(
+              'SELECT title, artist, file_size, modified_at, sync_key FROM movies WHERE id = 1;')
           .first;
       expect(mv['title'], 'Arrival');
       expect(mv['artist'], isNull);
       expect(mv['file_size'], 0);
       expect(mv['modified_at'], 0);
+      expect(SyncKeyUtils.isV2SyncKey(mv['sync_key'] as String?), isTrue);
 
-      final wp = db.select("SELECT position_ms FROM watch_progress WHERE media_key = 'ep_andor_1';").first;
+      final wp = db.select(
+        'SELECT position_ms FROM watch_progress WHERE media_key = ?;',
+        [migratedEpKey],
+      ).first;
       expect(wp['position_ms'], 600000);
 
-      final bm = db.select("SELECT label, position_ms FROM media_bookmarks WHERE media_key = 'ep_andor_1';").first;
+      final bm = db.select(
+        'SELECT label, position_ms FROM media_bookmarks WHERE media_key = ?;',
+        [migratedEpKey],
+      ).first;
       expect(bm['label'], 'Intro Ende');
       expect(bm['position_ms'], 300000);
 
-      final pref = db.select('SELECT intro_skip_seconds, audio_track FROM series_preferences WHERE series_id = 1;').first;
+      final pref = db
+          .select(
+              'SELECT intro_skip_seconds, audio_track FROM series_preferences WHERE series_id = 1;')
+          .first;
       expect(pref['intro_skip_seconds'], 85);
       expect(pref['audio_track'], 'eng');
 
       // Re-opening must be idempotent
       service.close();
       await service.open(dbPath: v3Path);
-      expect(service.instance.select('PRAGMA user_version;').first.values.first, 4);
+      expect(service.instance.select('PRAGMA user_version;').first.values.first,
+          6);
+    });
+
+    test(
+        'migrates v5 schema to v6 adding retry columns and normalizing legacy failed/processing statuses',
+        () async {
+      final env = await TestEnv.create();
+      addTearDown(env.dispose);
+
+      final v5Path = p.join(env.tempRoot.path, 'legacy_v5.db');
+      final raw = sqlite3.open(v5Path);
+      raw.execute('''
+        CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE series (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, folder_path TEXT NOT NULL UNIQUE, poster_path TEXT, summary TEXT, last_watched_at INTEGER);
+        CREATE TABLE seasons (id INTEGER PRIMARY KEY AUTOINCREMENT, series_id INTEGER NOT NULL, season_number INTEGER NOT NULL, folder_path TEXT NOT NULL);
+        CREATE TABLE episodes (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          series_id INTEGER NOT NULL,
+          season_id INTEGER NOT NULL,
+          episode_number INTEGER NOT NULL,
+          title TEXT NOT NULL,
+          file_path TEXT NOT NULL UNIQUE,
+          duration_ms INTEGER NOT NULL DEFAULT 0,
+          thumb_path TEXT,
+          sync_key TEXT,
+          thumb_status TEXT NOT NULL DEFAULT 'pending',
+          artist TEXT,
+          file_size INTEGER NOT NULL DEFAULT 0,
+          modified_at INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE movies (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          title TEXT NOT NULL,
+          release_year INTEGER,
+          file_path TEXT NOT NULL UNIQUE,
+          poster_path TEXT,
+          thumb_path TEXT,
+          duration_ms INTEGER NOT NULL DEFAULT 0,
+          last_watched_at INTEGER,
+          sync_key TEXT,
+          thumb_status TEXT NOT NULL DEFAULT 'pending',
+          artist TEXT,
+          file_size INTEGER NOT NULL DEFAULT 0,
+          modified_at INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE watch_progress (media_key TEXT PRIMARY KEY, media_type TEXT NOT NULL, position_ms INTEGER NOT NULL DEFAULT 0, duration_ms INTEGER NOT NULL DEFAULT 0, completed INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL, source_device TEXT NOT NULL);
+        CREATE TABLE series_preferences (series_id INTEGER PRIMARY KEY, audio_track TEXT, subtitle_track TEXT, intro_skip_seconds INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE watch_history (id INTEGER PRIMARY KEY AUTOINCREMENT, media_key TEXT NOT NULL, media_type TEXT NOT NULL, title TEXT NOT NULL, series_id INTEGER, watched_ms INTEGER NOT NULL DEFAULT 0, started_at INTEGER NOT NULL, ended_at INTEGER NOT NULL, day_key TEXT NOT NULL, weekday INTEGER NOT NULL, source_device TEXT NOT NULL);
+        CREATE TABLE media_bookmarks (id INTEGER PRIMARY KEY AUTOINCREMENT, media_key TEXT NOT NULL, position_ms INTEGER NOT NULL, label TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL);
+        CREATE TABLE media_sources (source_id TEXT PRIMARY KEY, root_path TEXT NOT NULL UNIQUE, label TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', created_at INTEGER NOT NULL);
+      ''');
+      raw.execute(
+        "INSERT INTO series (id, title, folder_path) VALUES (1, 'Dark', 'D:\\Dark');",
+      );
+      raw.execute(
+        "INSERT INTO seasons (id, series_id, season_number, folder_path) VALUES (1, 1, 1, 'D:\\Dark\\S01');",
+      );
+      raw.execute(
+        "INSERT INTO episodes (id, series_id, season_id, episode_number, title, file_path, thumb_status) VALUES (1, 1, 1, 1, 'Ep1', 'D:\\Dark\\ep1.mkv', 'failed'), (2, 1, 1, 2, 'Ep2', 'D:\\Dark\\ep2.mkv', 'processing');",
+      );
+      raw.execute(
+        "INSERT INTO movies (id, title, file_path, thumb_status) VALUES (1, 'Dune', 'D:\\Movies\\dune.mkv', 'failed');",
+      );
+      raw.execute('PRAGMA user_version = 5;');
+      raw.dispose();
+
+      final service = DatabaseService();
+      await service.open(dbPath: v5Path);
+      addTearDown(service.close);
+
+      final db = service.instance;
+      expect(db.select('PRAGMA user_version;').first.values.first, 6);
+
+      final ep1 = db
+          .select(
+              'SELECT thumb_status, thumb_attempts FROM episodes WHERE id = 1;')
+          .first;
+      final ep2 = db
+          .select(
+              'SELECT thumb_status, thumb_attempts FROM episodes WHERE id = 2;')
+          .first;
+      final mv1 = db
+          .select(
+              'SELECT thumb_status, thumb_attempts FROM movies WHERE id = 1;')
+          .first;
+      expect(ep1['thumb_status'], 'retry_wait');
+      expect(ep1['thumb_attempts'], 1);
+      expect(ep2['thumb_status'], 'pending');
+      expect(ep2['thumb_attempts'], 0);
+      expect(mv1['thumb_status'], 'retry_wait');
+      expect(mv1['thumb_attempts'], 1);
     });
   });
 
   group('PortablePaths, Sync across DBs & Stats integrity', () {
-    test('PortablePaths.resolveThumbnailPath resolves relative and preserves absolute paths',
+    test(
+        'PortablePaths.resolveThumbnailPath resolves relative and preserves absolute paths',
         () async {
       final env = await TestEnv.create();
       addTearDown(env.dispose);
@@ -433,13 +557,17 @@ void main() {
       expect(PortablePaths.resolveThumbnailPath('   '), isNull);
 
       final rel = PortablePaths.resolveThumbnailPath('ep_abc123.jpg');
-      expect(rel, p.join(env.tempRoot.path, 'app_base', 'cache', 'thumbnails', 'ep_abc123.jpg'));
+      expect(
+          rel,
+          p.join(env.tempRoot.path, 'app_base', 'cache', 'thumbnails',
+              'ep_abc123.jpg'));
 
       final abs = p.join(env.tempRoot.path, 'custom', 'poster.jpg');
       expect(PortablePaths.resolveThumbnailPath(abs), abs);
     });
 
-    test('ProgressSyncService syncs across two DBs with swapped AUTOINCREMENT IDs and handles parallel calls',
+    test(
+        'ProgressSyncService syncs across two DBs with swapped AUTOINCREMENT IDs and handles parallel calls',
         () async {
       final env = await TestEnv.create();
       addTearDown(env.dispose);
@@ -455,12 +583,16 @@ void main() {
       addTearDown(dbA.close);
       addTearDown(dbB.close);
 
-      final keyEpA = SyncKeyUtils.buildStableSyncKey('ep', r'\\NAS\Dark\S01E01.mkv', r'\\NAS');
-      final keyEpB = SyncKeyUtils.buildStableSyncKey('ep', r'\\NAS\Andor\S01E01.mkv', r'\\NAS');
+      final keyEpA = SyncKeyUtils.buildStableSyncKey(
+          'ep', r'\\NAS\Dark\S01E01.mkv', r'\\NAS');
+      final keyEpB = SyncKeyUtils.buildStableSyncKey(
+          'ep', r'\\NAS\Andor\S01E01.mkv', r'\\NAS');
 
       // Device A: Dark is id=1, Andor is id=2
-      dbA.instance.execute("INSERT INTO series (id, title, folder_path) VALUES (1, 'Dark', 'D1'), (2, 'Andor', 'A1');");
-      dbA.instance.execute("INSERT INTO seasons (id, series_id, season_number, folder_path) VALUES (1, 1, 1, 'S1'), (2, 2, 1, 'S2');");
+      dbA.instance.execute(
+          "INSERT INTO series (id, title, folder_path) VALUES (1, 'Dark', 'D1'), (2, 'Andor', 'A1');");
+      dbA.instance.execute(
+          "INSERT INTO seasons (id, series_id, season_number, folder_path) VALUES (1, 1, 1, 'S1'), (2, 2, 1, 'S2');");
       dbA.instance.execute(
         "INSERT INTO episodes (id, series_id, season_id, episode_number, title, file_path, sync_key) VALUES (1, 1, 1, 1, 'Ep1', 'f1', ?), (2, 2, 2, 1, 'Ep2', 'f2', ?);",
         [keyEpA, keyEpB],
@@ -471,8 +603,10 @@ void main() {
       );
 
       // Device B: Andor is id=1, Dark is id=2 (swapped AUTOINCREMENT IDs!)
-      dbB.instance.execute("INSERT INTO series (id, title, folder_path) VALUES (1, 'Andor', 'A1'), (2, 'Dark', 'D1');");
-      dbB.instance.execute("INSERT INTO seasons (id, series_id, season_number, folder_path) VALUES (1, 1, 1, 'S2'), (2, 2, 1, 'S1');");
+      dbB.instance.execute(
+          "INSERT INTO series (id, title, folder_path) VALUES (1, 'Andor', 'A1'), (2, 'Dark', 'D1');");
+      dbB.instance.execute(
+          "INSERT INTO seasons (id, series_id, season_number, folder_path) VALUES (1, 1, 1, 'S2'), (2, 2, 1, 'S1');");
       dbB.instance.execute(
         "INSERT INTO episodes (id, series_id, season_id, episode_number, title, file_path, sync_key) VALUES (1, 1, 1, 1, 'Ep2', 'f2', ?), (2, 2, 2, 1, 'Ep1', 'f1', ?);",
         [keyEpB, keyEpA],
@@ -487,7 +621,8 @@ void main() {
         syncA.syncWithRoots([nasDir.path]),
       ]);
       expect(resultsA.every((r) => r.syncedToNas), isTrue);
-      expect(File(p.join(nasDir.path, 'progress_sync.json.tmp')).existsSync(), isFalse);
+      expect(File(p.join(nasDir.path, 'progress_sync.json.tmp')).existsSync(),
+          isFalse);
 
       final resultB = await syncB.syncWithRoots([nasDir.path]);
       expect(resultB.syncedToNas, isTrue);
@@ -500,7 +635,8 @@ void main() {
       expect(progressOnB.first['position_ms'], 50000);
     });
 
-    test('StatsController excludes orphaned watch_progress rows from completed counts',
+    test(
+        'StatsController excludes orphaned watch_progress rows from completed counts',
         () async {
       final env = await TestEnv.create(inMemory: true);
       addTearDown(env.dispose);

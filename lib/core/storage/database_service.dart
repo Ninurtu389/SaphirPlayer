@@ -1,18 +1,37 @@
-import 'dart:convert';
+import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
+import 'database_backup_service.dart';
+import 'database_migrations.dart';
 import 'portable_paths.dart';
 import 'sync_key_utils.dart';
 
 class DatabaseService {
-  static const int schemaVersion = 4;
+  DatabaseService({StorageLayout? storageLayout})
+      : _storageLayout = storageLayout;
 
+  static const int schemaVersion = 6;
+
+  final StorageLayout? _storageLayout;
   Database? _db;
+  String? _currentDbPath;
+
+  String? get currentDbPath => _currentDbPath;
 
   Future<void> open({String? dbPath}) async {
     if (_db != null) {
       return;
     }
-    final resolvedPath = dbPath ?? await PortablePaths.getDatabaseFilePath();
+    final resolvedPath = dbPath ??
+        _storageLayout?.databaseFilePath ??
+        await PortablePaths.getDatabaseFilePath();
+    if (resolvedPath != ':memory:') {
+      await PortablePaths.verifyDirectoryWritable(
+        p.dirname(resolvedPath),
+        mode: _storageLayout?.mode ??
+            PortablePaths.activeLayout?.mode ??
+            StorageMode.standard,
+      );
+    }
     final db = sqlite3.open(resolvedPath);
     try {
       db.execute('PRAGMA journal_mode = WAL;');
@@ -28,18 +47,30 @@ class DatabaseService {
       final currentVersion = versionRows.isNotEmpty
           ? (versionRows.first.values.first as int? ?? 0)
           : 0;
+      final needsMigration = (currentVersion == 0 && hadExistingTables) ||
+          (currentVersion > 0 && currentVersion < schemaVersion);
+      if (needsMigration && resolvedPath != ':memory:') {
+        final backupDir = _storageLayout?.backupsDirectory ??
+            p.join(p.dirname(resolvedPath), 'backups');
+        await DatabaseBackupService.createSnapshotFromDatabase(
+          db,
+          backupDirPath: backupDir,
+          reason: 'pre_migration',
+        );
+      }
       _createSchema(db);
       if (currentVersion == 0) {
         if (hadExistingTables) {
-          _migrateSchema(db, 0);
+          DatabaseMigrations.migrate(db, 0);
         }
         db.execute('PRAGMA user_version = $schemaVersion;');
       } else if (currentVersion < schemaVersion) {
-        _migrateSchema(db, currentVersion);
+        DatabaseMigrations.migrate(db, currentVersion);
         db.execute('PRAGMA user_version = $schemaVersion;');
       }
       _createIndices(db);
       _db = db;
+      _currentDbPath = resolvedPath;
     } catch (_) {
       db.dispose();
       rethrow;
@@ -61,6 +92,16 @@ class DatabaseService {
       CREATE TABLE IF NOT EXISTS app_settings (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
+      );
+    ''');
+
+    db.execute('''
+      CREATE TABLE IF NOT EXISTS media_sources (
+        source_id TEXT PRIMARY KEY,
+        root_path TEXT NOT NULL UNIQUE,
+        label TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at INTEGER NOT NULL
       );
     ''');
 
@@ -98,6 +139,9 @@ class DatabaseService {
         thumb_path TEXT,
         sync_key TEXT,
         thumb_status TEXT NOT NULL DEFAULT 'pending',
+        thumb_attempts INTEGER NOT NULL DEFAULT 0,
+        thumb_last_error TEXT,
+        thumb_retry_at INTEGER NOT NULL DEFAULT 0,
         artist TEXT,
         file_size INTEGER NOT NULL DEFAULT 0,
         modified_at INTEGER NOT NULL DEFAULT 0,
@@ -118,6 +162,9 @@ class DatabaseService {
         last_watched_at INTEGER,
         sync_key TEXT,
         thumb_status TEXT NOT NULL DEFAULT 'pending',
+        thumb_attempts INTEGER NOT NULL DEFAULT 0,
+        thumb_last_error TEXT,
+        thumb_retry_at INTEGER NOT NULL DEFAULT 0,
         artist TEXT,
         file_size INTEGER NOT NULL DEFAULT 0,
         modified_at INTEGER NOT NULL DEFAULT 0
@@ -201,223 +248,75 @@ class DatabaseService {
     db.execute(
       'CREATE INDEX IF NOT EXISTS idx_watch_progress_completed_updated ON watch_progress(completed, updated_at);',
     );
-  }
-
-  void _migrateSchema(Database db, int fromVersion) {
-    if (fromVersion < 2) {
-      final columns = db.select('PRAGMA table_info(series_preferences);');
-      final hasIntroSkip = columns.any(
-        (col) => col['name'] == 'intro_skip_seconds',
-      );
-      if (!hasIntroSkip) {
-        db.execute(
-          'ALTER TABLE series_preferences ADD COLUMN intro_skip_seconds INTEGER NOT NULL DEFAULT 0;',
-        );
-      }
-      db.execute('''
-        CREATE TABLE IF NOT EXISTS media_bookmarks (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          media_key TEXT NOT NULL,
-          position_ms INTEGER NOT NULL,
-          label TEXT NOT NULL DEFAULT '',
-          created_at INTEGER NOT NULL
-        );
-      ''');
-    }
-
-    if (fromVersion < 3) {
-      _ensureColumn(db, 'episodes', 'sync_key', 'TEXT');
-      _ensureColumn(
-        db,
-        'episodes',
-        'thumb_status',
-        "TEXT NOT NULL DEFAULT 'pending'",
-      );
-      _ensureColumn(db, 'movies', 'sync_key', 'TEXT');
-      _ensureColumn(
-        db,
-        'movies',
-        'thumb_status',
-        "TEXT NOT NULL DEFAULT 'pending'",
-      );
-
-      db.execute(
-        "UPDATE episodes SET thumb_status = 'ready' WHERE thumb_path IS NOT NULL AND thumb_path != '';",
-      );
-      db.execute(
-        "UPDATE movies SET thumb_status = 'ready' WHERE thumb_path IS NOT NULL AND thumb_path != '';",
-      );
-
-      final roots = _readConfiguredRoots(db);
-      db.execute('BEGIN TRANSACTION;');
-      try {
-        _backfillMediaSyncKeys(
-          db,
-          table: 'episodes',
-          prefix: 'ep',
-          legacyPrefix: 'episode_',
-          roots: roots,
-        );
-        _backfillMediaSyncKeys(
-          db,
-          table: 'movies',
-          prefix: 'mv',
-          legacyPrefix: 'movie_',
-          roots: roots,
-        );
-        db.execute('COMMIT;');
-      } catch (_) {
-        db.execute('ROLLBACK;');
-        rethrow;
-      }
-    }
-
-    if (fromVersion < 4) {
-      _ensureColumn(db, 'episodes', 'artist', 'TEXT');
-      _ensureColumn(db, 'episodes', 'file_size', 'INTEGER NOT NULL DEFAULT 0');
-      _ensureColumn(db, 'episodes', 'modified_at', 'INTEGER NOT NULL DEFAULT 0');
-      _ensureColumn(db, 'movies', 'artist', 'TEXT');
-      _ensureColumn(db, 'movies', 'file_size', 'INTEGER NOT NULL DEFAULT 0');
-      _ensureColumn(db, 'movies', 'modified_at', 'INTEGER NOT NULL DEFAULT 0');
-    }
-  }
-
-  void _ensureColumn(
-    Database db,
-    String table,
-    String columnName,
-    String columnDef,
-  ) {
-    final columns = db.select('PRAGMA table_info($table);');
-    final exists = columns.any((col) => col['name'] == columnName);
-    if (!exists) {
-      db.execute('ALTER TABLE $table ADD COLUMN $columnName $columnDef;');
-    }
-  }
-
-  List<String> _readConfiguredRoots(Database db) {
-    final roots = <String>[];
-    final multiRows = db.select(
-      "SELECT value FROM app_settings WHERE key = 'nas_root_paths' LIMIT 1;",
+    db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_episodes_thumb_queue ON episodes(thumb_status, thumb_retry_at);',
     );
-    if (multiRows.isNotEmpty) {
-      try {
-        final decoded = jsonDecode(multiRows.first['value'] as String);
-        if (decoded is List) {
-          for (final item in decoded) {
-            if (item is String && item.trim().isNotEmpty) {
-              roots.add(item.trim());
-            }
-          }
-        }
-      } on FormatException {
-        // Ignoriere fehlerhafte JSON-Einträge bei Legacy-Migration
-      }
-    }
-    if (roots.isEmpty) {
-      final singleRows = db.select(
-        "SELECT value FROM app_settings WHERE key = 'nas_root_path' LIMIT 1;",
-      );
-      if (singleRows.isNotEmpty) {
-        final val = (singleRows.first['value'] as String).trim();
-        if (val.isNotEmpty) {
-          roots.add(val);
-        }
-      }
-    }
-    return roots;
+    db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_movies_thumb_queue ON movies(thumb_status, thumb_retry_at);',
+    );
   }
 
-  void _backfillMediaSyncKeys(
-    Database db, {
-    required String table,
-    required String prefix,
-    required String legacyPrefix,
-    required List<String> roots,
+  Map<String, String> loadSourceIdsByRoot() {
+    final db = instance;
+    final rows = db.select(
+      'SELECT source_id, root_path FROM media_sources ORDER BY created_at ASC;',
+    );
+    return {
+      for (final row in rows)
+        row['root_path'] as String: row['source_id'] as String,
+    };
+  }
+
+  String ensureMediaSource(
+    String rootPath, {
+    String? preferredSourceId,
+    String? label,
   }) {
-    final rows = db.select('SELECT id, file_path, sync_key FROM $table;');
-    final usedKeys = <String>{};
+    final trimmed = rootPath.trim();
+    if (trimmed.isEmpty) {
+      return SyncKeyUtils.defaultSourceId;
+    }
+    final db = instance;
+    final normTarget = SyncKeyUtils.normalizeRootPath(trimmed);
+    final rows = db.select('SELECT source_id, root_path FROM media_sources;');
+    final usedIds = <String>{};
     for (final row in rows) {
-      final existing = row['sync_key'] as String?;
-      if (existing != null && existing.isNotEmpty) {
-        usedKeys.add(existing);
+      final id = row['source_id'] as String;
+      final existingRoot = row['root_path'] as String;
+      usedIds.add(id);
+      if (SyncKeyUtils.normalizeRootPath(existingRoot) == normTarget) {
+        return id;
       }
     }
 
-    for (final row in rows) {
-      final id = row['id'] as int;
-      final filePath = row['file_path'] as String;
-      var syncKey = row['sync_key'] as String?;
-      if (syncKey == null || syncKey.isEmpty) {
-        syncKey = SyncKeyUtils.buildKeyFromRoots(prefix, filePath, roots);
-        if (usedKeys.contains(syncKey)) {
-          syncKey = SyncKeyUtils.buildStableSyncKey(prefix, filePath, '');
-        }
-        usedKeys.add(syncKey);
-        db.execute(
-          'UPDATE $table SET sync_key = ? WHERE id = ?;',
-          [syncKey, id],
-        );
-      }
-      _migrateLegacyMediaKey(db, '$legacyPrefix$id', syncKey);
+    final baseId =
+        (preferredSourceId != null && preferredSourceId.trim().isNotEmpty)
+            ? SyncKeyUtils.normalizeSourceId(preferredSourceId)
+            : SyncKeyUtils.deriveDefaultSourceId(trimmed);
+    var candidate = baseId;
+    var suffix = 2;
+    while (usedIds.contains(candidate)) {
+      candidate = '${baseId}_$suffix';
+      suffix++;
     }
-  }
 
-  void _migrateLegacyMediaKey(
-    Database db,
-    String legacyKey,
-    String syncKey,
-  ) {
-    final legacyProgress = db.select(
-      'SELECT * FROM watch_progress WHERE media_key = ? LIMIT 1;',
-      [legacyKey],
-    );
-    if (legacyProgress.isNotEmpty) {
-      final existingNew = db.select(
-        'SELECT updated_at FROM watch_progress WHERE media_key = ? LIMIT 1;',
-        [syncKey],
-      );
-      if (existingNew.isEmpty) {
-        db.execute(
-          'UPDATE watch_progress SET media_key = ? WHERE media_key = ?;',
-          [syncKey, legacyKey],
-        );
-      } else {
-        final oldRow = legacyProgress.first;
-        final oldUpdated = (oldRow['updated_at'] as int?) ?? 0;
-        final newUpdated = (existingNew.first['updated_at'] as int?) ?? 0;
-        if (oldUpdated > newUpdated) {
-          db.execute(
-            '''
-            UPDATE watch_progress
-            SET position_ms = ?, duration_ms = ?, completed = ?, updated_at = ?, source_device = ?
-            WHERE media_key = ?;
-            ''',
-            [
-              oldRow['position_ms'],
-              oldRow['duration_ms'],
-              oldRow['completed'],
-              oldUpdated,
-              oldRow['source_device'],
-              syncKey,
-            ],
-          );
-        }
-        db.execute(
-          'DELETE FROM watch_progress WHERE media_key = ?;',
-          [legacyKey],
-        );
-      }
-    }
+    final resolvedLabel = (label != null && label.trim().isNotEmpty)
+        ? label.trim()
+        : (p.basename(trimmed).trim().isEmpty ? trimmed : p.basename(trimmed));
 
     db.execute(
-      'UPDATE watch_history SET media_key = ? WHERE media_key = ?;',
-      [syncKey, legacyKey],
+      '''
+      INSERT INTO media_sources (source_id, root_path, label, status, created_at)
+      VALUES (?, ?, ?, 'active', ?);
+      ''',
+      [
+        candidate,
+        trimmed,
+        resolvedLabel,
+        DateTime.now().millisecondsSinceEpoch
+      ],
     );
-    db.execute(
-      'UPDATE media_bookmarks SET media_key = ? WHERE media_key = ?;',
-      [syncKey, legacyKey],
-    );
+    return candidate;
   }
 
   void resetDatabase() {
@@ -432,6 +331,7 @@ class DatabaseService {
       db.execute('DELETE FROM seasons;');
       db.execute('DELETE FROM series;');
       db.execute('DELETE FROM movies;');
+      db.execute('DELETE FROM media_sources;');
       db.execute('DELETE FROM app_settings;');
       db.execute('COMMIT;');
     } catch (_) {
@@ -443,5 +343,6 @@ class DatabaseService {
   void close() {
     _db?.dispose();
     _db = null;
+    _currentDbPath = null;
   }
 }

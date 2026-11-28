@@ -96,7 +96,9 @@ void main() {
 
     await tester.enterText(
       find.byWidgetPredicate(
-        (w) => w is TextField && w.decoration?.labelText == AppStrings.nasPathLabel,
+        (w) =>
+            w is TextField &&
+            w.decoration?.labelText == AppStrings.nasPathLabel,
       ),
       nasRoot.path,
     );
@@ -196,5 +198,12 @@ void main() {
     await tester.tap(find.text(AppStrings.homeTab));
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text(AppStrings.emptyHomeMessage), findsOneWidget);
+
+    // 7. Verify automatic pre_reset backup was created and can restore the library
+    expect(settingsController.latestBackup, isNotNull);
+    expect(settingsController.latestBackup!.reason, 'pre_reset');
+    await tester.runAsync(() => shellController.handleRestoreBackup());
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(libraryController.seriesCount, 1);
   });
 }

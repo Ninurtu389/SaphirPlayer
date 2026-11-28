@@ -119,6 +119,33 @@ class _ShellViewState extends State<ShellView> {
     _globalSearchController.clear();
   }
 
+  Future<void> _confirmRestoreBackup() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppColors.anthraciteSurface,
+        title: const Text(AppStrings.backupRestoreConfirmTitle),
+        content: const Text(AppStrings.backupRestoreConfirmMessage),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text(AppStrings.cancelAction),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text(AppStrings.backupRestoreConfirmAction),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) {
+      return;
+    }
+
+    await widget.shellController.handleRestoreBackup();
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -159,9 +186,8 @@ class _ShellViewState extends State<ShellView> {
                         activeSection: activeSection,
                         onSelectSection: widget.shellController.selectSection,
                         isScanning: widget.libraryController.isScanning,
-                        isNasOffline:
-                            widget.libraryController.statusMessage ==
-                                AppStrings.nasOfflineStatus,
+                        isNasOffline: widget.libraryController.statusMessage ==
+                            AppStrings.nasOfflineStatus,
                         statusMessage: widget.libraryController.statusMessage,
                       ),
                     ),
@@ -237,6 +263,11 @@ class _ShellViewState extends State<ShellView> {
             onSyncNow: widget.shellController.handleSyncNow,
             onClearCache: widget.shellController.handleClearCache,
             onResetDatabase: _confirmResetDatabase,
+            onRetryFailedThumbnails:
+                widget.shellController.handleRetryFailedThumbnails,
+            onCreateBackup: widget.shellController.handleCreateBackup,
+            onRestoreBackup: _confirmRestoreBackup,
+            isBusy: widget.shellController.isMaintenanceInProgress,
           ),
         );
     }

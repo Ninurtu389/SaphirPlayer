@@ -12,8 +12,9 @@ void main() {
       addTearDown(env.dispose);
 
       final root = env.createSubdir('nas_root');
-      final seriesDir = Directory(p.join(root.path, 'Serien', 'Severance', 'Season 1'))
-        ..createSync(recursive: true);
+      final seriesDir =
+          Directory(p.join(root.path, 'Serien', 'Severance', 'Season 1'))
+            ..createSync(recursive: true);
       createSyntheticMp4HeaderFile(
         seriesDir,
         'Severance - S01E01 - Good News About Hell.mp4',
@@ -31,9 +32,11 @@ void main() {
       expect(result.nasReachable, isTrue);
       expect(result.seriesCount, 1);
       expect(result.movieCount, 1);
+      expect(result.sourceReports.single.status, SourceScanStatus.complete);
     });
 
-    test('handles 0-byte files, corrupt containers, and missing roots without crashing',
+    test(
+        'handles 0-byte files, corrupt containers, and missing roots without crashing',
         () async {
       final env = await TestEnv.create();
       addTearDown(env.dispose);
@@ -47,6 +50,10 @@ void main() {
         p.join(env.tempRoot.path, 'does_not_exist'),
       ]);
       expect(missingResult.nasReachable, isFalse);
+      expect(
+        missingResult.sourceReports.single.status,
+        SourceScanStatus.unreachable,
+      );
 
       final emptyRootResult = await scanner.scanLibrary(['   ', '']);
       expect(emptyRootResult.nasReachable, isFalse);
@@ -56,7 +63,8 @@ void main() {
       expect(result.movieCount, 2);
     });
 
-    test('removes deleted source files and cleans up orphaned series, seasons, and thumbnails',
+    test(
+        'removes deleted source files and cleans up orphaned series, seasons, and thumbnails',
         () async {
       final env = await TestEnv.create();
       addTearDown(env.dispose);
@@ -65,13 +73,15 @@ void main() {
       final showDir = Directory(p.join(root.path, 'Dark', 'Season 1'))
         ..createSync(recursive: true);
       final epFile = createSyntheticMp4HeaderFile(showDir, 'Dark - S01E01.mkv');
-      final movieFile = createSyntheticMp4HeaderFile(root, 'Arrival (2016).mkv');
+      final movieFile =
+          createSyntheticMp4HeaderFile(root, 'Arrival (2016).mkv');
 
       final scanner = NasScannerService(env.dbService);
       await scanner.scanLibrary([root.path]);
 
       // Attach synthetic thumbnails in cache
-      final cacheDir = env.createSubdir(p.join('app_base', 'cache', 'thumbnails'));
+      final cacheDir =
+          env.createSubdir(p.join('app_base', 'cache', 'thumbnails'));
       final epThumb = createValidTinyJpeg(cacheDir, 'ep_orphan.jpg');
       final mvThumb = createValidTinyJpeg(cacheDir, 'mv_orphan.jpg');
       env.dbService.instance.execute(
@@ -130,7 +140,8 @@ void main() {
       expect(result.seriesCount, 1);
     });
 
-    test('groups flat episodes in root by series title and marks failed thumbnails',
+    test(
+        'groups flat episodes in root by series title and marks failed thumbnails',
         () async {
       final env = await TestEnv.create();
       addTearDown(env.dispose);
@@ -145,9 +156,10 @@ void main() {
       expect(result.nasReachable, isTrue);
       expect(result.seriesCount, 2);
 
-      final failedEps = env.dbService.instance
-          .select("SELECT thumb_status FROM episodes WHERE thumb_status = 'failed';");
+      final failedEps = env.dbService.instance.select(
+          "SELECT thumb_status, thumb_attempts FROM episodes WHERE thumb_status = 'retry_wait';");
       expect(failedEps.length, 2);
+      expect(failedEps.every((row) => row['thumb_attempts'] == 1), isTrue);
     });
   });
 }

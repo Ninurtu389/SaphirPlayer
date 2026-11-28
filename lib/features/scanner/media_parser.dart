@@ -128,9 +128,15 @@ class MediaParser {
   static String buildStableSyncKey(
     String prefix,
     String filePath,
-    String rootPath,
-  ) {
-    return SyncKeyUtils.buildStableSyncKey(prefix, filePath, rootPath);
+    String rootPath, {
+    String? sourceId,
+  }) {
+    return SyncKeyUtils.buildStableSyncKey(
+      prefix,
+      filePath,
+      rootPath,
+      sourceId: sourceId,
+    );
   }
 
   static Match? _findValidXMatch(String text) {
@@ -169,7 +175,11 @@ class MediaParser {
     return imageExtensions.contains(ext);
   }
 
-  static ParsedEpisode? parseEpisode(String filePath, String rootFolderPath) {
+  static ParsedEpisode? parseEpisode(
+    String filePath,
+    String rootFolderPath, {
+    String? sourceId,
+  }) {
     final baseName = p.basenameWithoutExtension(filePath);
     final relPath = p.relative(filePath, from: rootFolderPath);
     final segments = p.split(relPath);
@@ -241,7 +251,12 @@ class MediaParser {
       episodeNumber: episodeNum,
       episodeTitle: episodeTitle,
       filePath: filePath,
-      syncKey: buildStableSyncKey('ep', filePath, rootFolderPath),
+      syncKey: buildStableSyncKey(
+        'ep',
+        filePath,
+        rootFolderPath,
+        sourceId: sourceId,
+      ),
     );
   }
 
@@ -269,7 +284,11 @@ class MediaParser {
     return null;
   }
 
-  static ParsedMovie parseMovie(String filePath, String rootFolderPath) {
+  static ParsedMovie parseMovie(
+    String filePath,
+    String rootFolderPath, {
+    String? sourceId,
+  }) {
     final baseName = p.basenameWithoutExtension(filePath);
     final relPath = p.relative(filePath, from: rootFolderPath);
     final segments = p.split(relPath);
@@ -298,7 +317,12 @@ class MediaParser {
       title: title.isEmpty ? baseName : title,
       releaseYear: releaseYear,
       filePath: filePath,
-      syncKey: buildStableSyncKey('mv', filePath, rootFolderPath),
+      syncKey: buildStableSyncKey(
+        'mv',
+        filePath,
+        rootFolderPath,
+        sourceId: sourceId,
+      ),
     );
   }
 
@@ -308,15 +332,21 @@ class MediaParser {
     EmbeddedMediaTags? tags, {
     required int fileSize,
     required int modifiedAt,
+    String? sourceId,
   }) {
-    final fromPath = parseEpisode(filePath, rootFolderPath);
+    final fromPath = parseEpisode(
+      filePath,
+      rootFolderPath,
+      sourceId: sourceId,
+    );
     final tagSeries = _nonEmpty(tags?.seriesTitle);
     final tagTitle = _nonEmpty(tags?.title);
     final tagArtist = _nonEmpty(tags?.artist);
     final tagSeason = tags?.seasonNumber;
     final tagEpisode = tags?.episodeNumber;
-    final tagDurationMs =
-        (tags?.durationMs != null && tags!.durationMs! > 0) ? tags.durationMs! : 0;
+    final tagDurationMs = (tags?.durationMs != null && tags!.durationMs! > 0)
+        ? tags.durationMs!
+        : 0;
 
     final isTagEpisode = tagEpisode != null &&
         tagEpisode > 0 &&
@@ -363,7 +393,12 @@ class MediaParser {
       episodeNumber: resolvedEpisode,
       episodeTitle: resolvedTitle,
       filePath: filePath,
-      syncKey: buildStableSyncKey('ep', filePath, rootFolderPath),
+      syncKey: buildStableSyncKey(
+        'ep',
+        filePath,
+        rootFolderPath,
+        sourceId: sourceId,
+      ),
       artist: tagArtist,
       durationMs: tagDurationMs,
       fileSize: fileSize,
@@ -377,12 +412,18 @@ class MediaParser {
     EmbeddedMediaTags? tags, {
     required int fileSize,
     required int modifiedAt,
+    String? sourceId,
   }) {
-    final fromPath = parseMovie(filePath, rootFolderPath);
+    final fromPath = parseMovie(
+      filePath,
+      rootFolderPath,
+      sourceId: sourceId,
+    );
     final tagTitle = _nonEmpty(tags?.title);
     final tagArtist = _nonEmpty(tags?.artist);
-    final tagDurationMs =
-        (tags?.durationMs != null && tags!.durationMs! > 0) ? tags.durationMs! : 0;
+    final tagDurationMs = (tags?.durationMs != null && tags!.durationMs! > 0)
+        ? tags.durationMs!
+        : 0;
 
     return ParsedMovie(
       title: tagTitle ?? fromPath.title,

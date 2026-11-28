@@ -5,6 +5,18 @@ class AppStrings {
   static const String startupErrorTitle = 'Startfehler';
   static const String startupErrorMessage =
       'Die lokale Datenbank konnte nicht geöffnet werden. Bitte prüfe, ob eine andere Instanz läuft oder der Speicherort beschreibbar ist.';
+  static const String storageLocationTitle = 'Speicherort';
+  static const String storageModePortableLabel =
+      'Portabler Modus (portable.flag)';
+  static const String storageModeStandardLabel =
+      'Standardmodus (Benutzerdaten)';
+  static const String legacyMigrationTitle = 'Bestehende Datenbank gefunden';
+  static const String legacyMigrationMessage =
+      'Im Programmordner wurde eine bestehende Datenbank aus einer früheren Version gefunden. Möchtest du diese Daten sicher in den Benutzerordner übernehmen? Das Original bleibt unverändert erhalten.';
+  static const String legacyMigrationSourceLabel = 'Gefundene Datenbank';
+  static const String legacyMigrationTargetLabel = 'Neuer Speicherort';
+  static const String legacyMigrationImportButton = 'Daten übernehmen';
+  static const String legacyMigrationSkipButton = 'Neu beginnen';
   static const String homeTab = 'Start';
   static const String libraryTab = 'Bibliothek';
   static const String statsTab = 'Statistiken';
@@ -63,6 +75,10 @@ class AppStrings {
   static const String scanButton = 'Bibliothek scannen';
   static const String scanningStatus = 'Scan läuft...';
   static const String scanPausedStatus = 'Scan pausiert (Wiedergabe aktiv)';
+  static const String scanPartialStatus =
+      'Scan teilweise abgeschlossen – nicht lesbare Ordner übersprungen';
+  static const String scanDeletionGuardStatus =
+      'Löschschutz aktiv – ungewöhnlich viele Dateien fehlen';
   static const String nasOfflineStatus =
       'NAS nicht erreichbar – lokaler Index aktiv';
   static const String seriesCountLabel = 'Serien';
@@ -136,9 +152,34 @@ class AppStrings {
   static const String megabytesUnit = 'MB';
   static const String clearCacheButton = 'Cache leeren';
   static const String cacheClearedStatus = 'Thumbnail-Cache geleert';
+  static const String cacheClearedWithWarningsStatus =
+      'Cache teilweise geleert – einzelne Dateien waren gesperrt';
+  static const String retryThumbnailsButton =
+      'Fehlgeschlagene Thumbnails erneut versuchen';
+  static const String retryThumbnailsStatus =
+      'Thumbnail-Warteschlange zurückgesetzt';
+  static const String thumbQueuePendingLabel = 'ausstehend';
+  static const String thumbQueueReadyLabel = 'fertig';
+  static const String thumbQueueFailedLabel = 'fehlgeschlagen';
   static const String syncNowButton = 'Sync abgleichen';
   static const String syncCompletedStatus = 'Fortschritt synchronisiert';
   static const String pickFolderDialogTitle = 'Medienordner auswählen';
+  static const String backupSectionTitle = 'Datenbank-Sicherung';
+  static const String backupCreateButton = 'Backup erstellen';
+  static const String backupRestoreButton = 'Wiederherstellen';
+  static const String backupNoneLabel = 'Noch keine Sicherung vorhanden';
+  static const String backupLatestPrefix = 'Letzte Sicherung:';
+  static const String backupCreatedStatus = 'Datenbank-Sicherung erstellt';
+  static const String backupFailedStatus = 'Datenbank-Sicherung fehlgeschlagen';
+  static const String backupRestoreConfirmTitle = 'Backup wiederherstellen?';
+  static const String backupRestoreConfirmMessage =
+      'Die aktuelle Datenbank wird vorher automatisch gesichert und anschließend durch das gewählte Backup ersetzt. Laufende Scans werden gestoppt.';
+  static const String backupRestoreConfirmAction = 'Wiederherstellen';
+  static const String backupRestoredStatus =
+      'Datenbank erfolgreich wiederhergestellt';
+  static const String backupRestoreFailedStatus =
+      'Wiederherstellung fehlgeschlagen';
+  static const String maintenanceBusyStatus = 'Wartungsvorgang läuft...';
   static const String resetDatabaseButton = 'Datenbank zurücksetzen';
   static const String resetDatabaseConfirmTitle = 'Datenbank zurücksetzen?';
   static const String resetDatabaseConfirmMessage =
@@ -187,8 +228,7 @@ class AppStrings {
     'Sonntag',
   ];
 
-  static const String settingsHwdecLabel =
-      'Hardware-Dekodierung (pro Gerät)';
+  static const String settingsHwdecLabel = 'Hardware-Dekodierung (pro Gerät)';
   static const String settingsHwdecDesc =
       'Nutzt GPU-Beschleunigung für flüssige Wiedergabe (wird beim nächsten Player-Start aktiv).';
   static const String settingsSubtitlesSectionTitle = 'Untertitel & Sprache';
@@ -233,8 +273,7 @@ class AppStrings {
   static const String aspect21x9Label = '21:9';
 
   static const String playerChapterPrefix = 'Kapitel';
-  static const String playerChapterPrevTooltip =
-      'Vorheriges Kapitel (Bild ab)';
+  static const String playerChapterPrevTooltip = 'Vorheriges Kapitel (Bild ab)';
   static const String playerChapterNextTooltip = 'Nächstes Kapitel (Bild auf)';
   static const String playerIntroSkipButton = 'Intro überspringen';
   static const String dismissIntroSkipTooltip = 'Ausblenden';
@@ -249,8 +288,7 @@ class AppStrings {
   static const String playerNoBookmarksLabel = 'Keine Lesezeichen';
   static const String playerScreenshotTooltip = 'Screenshot speichern (S)';
   static const String playerScreenshotSavedOsd = 'Screenshot gespeichert';
-  static const String playerScreenshotFailedOsd =
-      'Screenshot fehlgeschlagen';
+  static const String playerScreenshotFailedOsd = 'Screenshot fehlgeschlagen';
   static const String playerFinishTimePrefix = 'Fertig um';
   static const String playerTimeToggleTooltip =
       'Anzeige wechseln (Gesamt / Rest / Endzeit)';

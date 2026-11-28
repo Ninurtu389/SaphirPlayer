@@ -68,7 +68,8 @@ void main() {
       expect(first, isNull);
 
       // Simulate existing cached thumbnail at the expected compact hash path
-      final cacheDir = env.createSubdir(p.join('app_base', 'cache', 'thumbnails'));
+      final cacheDir =
+          env.createSubdir(p.join('app_base', 'cache', 'thumbnails'));
       // Verify a corrupt 0-byte cached file is deleted cleanly
       final corruptFile = createEmptyVideoFile(mediaDir, 'corrupt_video.mkv');
       expect(
@@ -83,13 +84,64 @@ void main() {
       expect(cacheDir.existsSync(), isTrue);
     });
 
-    test('SettingsController.clearThumbnailCache deletes cached files and clears DB refs',
+    test(
+        'validates cached image magic bytes, evicts corrupt cache entries, and reuses valid fingerprints',
+        () async {
+      final env = await TestEnv.create();
+      addTearDown(env.dispose);
+
+      final mediaDir = env.createSubdir('media_cache_check');
+      final video = createSyntheticMp4HeaderFile(mediaDir, 'Episode01.mp4');
+      final stat = video.statSync();
+      final cacheDir =
+          env.createSubdir(p.join('app_base', 'cache', 'thumbnails'));
+      final expectedName = ThumbnailCacheKey.buildCacheFileName(
+        prefix: 'ep',
+        filePath: video.path,
+        fileSize: stat.size,
+        modifiedAt: stat.modified.millisecondsSinceEpoch,
+      );
+
+      // Corrupt text bytes under the expected filename must be rejected and deleted.
+      final corruptCached = createCorruptVideoFile(cacheDir, expectedName);
+      expect(corruptCached.existsSync(), isTrue);
+
+      final corruptOutcome =
+          await ThumbnailGeneratorService.generateThumbnailWithOutcome(
+        videoFilePath: video.path,
+        durationMs: 60000,
+        isPlaybackActive: () => false,
+        fileSize: stat.size,
+        modifiedAt: stat.modified.millisecondsSinceEpoch,
+        allowMediaKitFallback: false,
+      );
+      expect(corruptOutcome.isSuccess, isFalse);
+      expect(corruptCached.existsSync(), isFalse);
+
+      // Valid JPEG under expected filename must hit cache without ffmpeg/media_kit.
+      createValidTinyJpeg(cacheDir, expectedName);
+      final hitOutcome =
+          await ThumbnailGeneratorService.generateThumbnailWithOutcome(
+        videoFilePath: video.path,
+        durationMs: 60000,
+        isPlaybackActive: () => false,
+        fileSize: stat.size,
+        modifiedAt: stat.modified.millisecondsSinceEpoch,
+        allowMediaKitFallback: false,
+      );
+      expect(hitOutcome.isSuccess, isTrue);
+      expect(hitOutcome.fileName, expectedName);
+    });
+
+    test(
+        'SettingsController.clearThumbnailCache deletes cached files and clears DB refs',
         () async {
       final env = await TestEnv.create();
       addTearDown(env.dispose);
       seedSampleLibrary(env.dbService);
 
-      final cacheDir = env.createSubdir(p.join('app_base', 'cache', 'thumbnails'));
+      final cacheDir =
+          env.createSubdir(p.join('app_base', 'cache', 'thumbnails'));
       final thumb1 = createValidTinyJpeg(cacheDir, 'ep_1.jpg');
       final thumb2 = createValidTinyJpeg(cacheDir, 'mv_1.jpg');
 
@@ -124,7 +176,8 @@ void main() {
       settings.dispose();
     });
 
-    test('computeSeekSeconds starts at 5th minute (300s) for >=5min or unknown duration and clamps short videos',
+    test(
+        'computeSeekSeconds starts at 5th minute (300s) for >=5min or unknown duration and clamps short videos',
         () {
       expect(ThumbnailGeneratorService.computeSeekSeconds(0), 300);
       expect(ThumbnailGeneratorService.computeSeekSeconds(-1), 300);

@@ -1,9 +1,12 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import '../constants/app_spacing.dart';
 import '../constants/app_strings.dart';
 import '../services/desktop_platform_service.dart';
+import '../storage/database_backup_service.dart';
 import '../storage/database_service.dart';
+import '../storage/portable_paths.dart';
 import '../storage/progress_sync_service.dart';
 import '../storage/thumbnail_cache_service.dart';
 import '../theme/effect_mode.dart';
@@ -14,19 +17,31 @@ class SettingsController extends ChangeNotifier {
     this._databaseService, {
     ProgressSyncService? syncService,
     ThumbnailCacheService? cacheService,
-  })  : _syncService = syncService ?? ProgressSyncService(_databaseService),
-        _cacheService = cacheService ?? const ThumbnailCacheService();
+    DatabaseBackupService? backupService,
+    ThumbnailOperationGate? thumbnailGate,
+    StorageLayout? storageLayout,
+  })  : _storageLayout = storageLayout,
+        _syncService = syncService ??
+            ProgressSyncService(_databaseService, storageLayout: storageLayout),
+        _cacheService = cacheService ??
+            ThumbnailCacheService(
+              storageLayout: storageLayout,
+              gate: thumbnailGate,
+            ),
+        _backupService = backupService ??
+            DatabaseBackupService(storageLayout: storageLayout);
 
   final DatabaseService _databaseService;
+  final StorageLayout? _storageLayout;
   final ProgressSyncService _syncService;
   final ThumbnailCacheService _cacheService;
+  final DatabaseBackupService _backupService;
 
   static const String _nasPathKey = 'nas_root_path';
   static const String _nasPathsKey = 'nas_root_paths';
   static const String _globalEffectKey = 'effect_mode_global';
   static const String _subtitlesDefaultKey = 'subtitles_default_enabled';
-  static const String _preferredSubtitleLangKey =
-      'preferred_subtitle_language';
+  static const String _preferredSubtitleLangKey = 'preferred_subtitle_language';
   static const String _subtitleScaleKey = 'subtitle_scale';
   static const String _subtitlePositionKey = 'subtitle_position';
   static const String _subtitleBgOpacityKey = 'subtitle_bg_opacity';
@@ -42,6 +57,8 @@ class SettingsController extends ChangeNotifier {
   int _subtitlePosition = AppSpacing.subtitlePositionDefault;
   double _subtitleBgOpacity = AppSpacing.subtitleBgOpacityDefault;
   bool _hardwareAccelerationEnabled = true;
+  BackupInfo? _latestBackup;
+  bool _isMaintenanceInProgress = false;
 
   List<String> get nasPaths => List.unmodifiable(_nasPaths);
   String get nasPath => _nasPaths.isNotEmpty ? _nasPaths.first : '';
@@ -55,11 +72,32 @@ class SettingsController extends ChangeNotifier {
   int get subtitlePosition => _subtitlePosition;
   double get subtitleBgOpacity => _subtitleBgOpacity;
   bool get hardwareAccelerationEnabled => _hardwareAccelerationEnabled;
+  bool get isPortableMode =>
+      (_storageLayout ?? PortablePaths.activeLayout)?.isPortable ?? false;
+  String get storageDataPath =>
+      (_storageLayout ?? PortablePaths.activeLayout)?.dataDirectory ?? '';
+  Map<String, String> get sourceIdsByRoot => _databaseService.isOpen
+      ? _databaseService.loadSourceIdsByRoot()
+      : const {};
+  BackupInfo? get latestBackup => _latestBackup;
+  bool get isMaintenanceInProgress => _isMaintenanceInProgress;
+
+  String get formattedLatestBackup {
+    final backup = _latestBackup;
+    if (backup == null) {
+      return AppStrings.backupNoneLabel;
+    }
+    final dt = backup.createdAt;
+    final date =
+        '${dt.day.toString().padLeft(2, '0')}.${dt.month.toString().padLeft(2, '0')}.${dt.year}';
+    final time =
+        '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    return '${AppStrings.backupLatestPrefix} $date $time (${Formatters.formatCacheSize(backup.sizeBytes)})';
+  }
 
   String get _deviceEffectKey =>
       'effect_mode_${DesktopPlatformService.localHostname}';
-  String get _deviceHwdecKey =>
-      'hwdec_${DesktopPlatformService.localHostname}';
+  String get _deviceHwdecKey => 'hwdec_${DesktopPlatformService.localHostname}';
 
   Future<SyncResult> syncProgress() {
     return _syncService.syncWithRoots(_nasPaths);
@@ -76,6 +114,7 @@ class SettingsController extends ChangeNotifier {
 
   Future<void> load() async {
     await refreshCacheSize();
+    await refreshLatestBackup();
     final db = _databaseService.instance;
 
     final multiRows = db.select(
@@ -180,9 +219,41 @@ class SettingsController extends ChangeNotifier {
     _safeNotify();
   }
 
+  Future<void> refreshLatestBackup() async {
+    try {
+      _latestBackup = await _backupService.latestBackup();
+    } on FileSystemException {
+      _latestBackup = null;
+    }
+    _safeNotify();
+  }
+
+  Future<BackupResult> createBackup({String reason = 'manual'}) async {
+    final result = await _backupService.createBackup(
+      _databaseService,
+      reason: reason,
+    );
+    if (result.success) {
+      _latestBackup = result.backupInfo;
+      _safeNotify();
+    }
+    return result;
+  }
+
+  Future<CacheClearResult> clearThumbnailCacheWithResult({
+    Future<void> Function()? onStopGeneration,
+  }) async {
+    final result = await _cacheService.clearCacheWithResult(
+      _databaseService,
+      onStopGeneration: onStopGeneration,
+    );
+    _cacheBytes = result.remainingBytes;
+    _safeNotify();
+    return result;
+  }
+
   Future<void> clearThumbnailCache() async {
-    await _cacheService.clearCache(_databaseService);
-    await refreshCacheSize();
+    await clearThumbnailCacheWithResult();
   }
 
   static bool _addUniquePath(List<String> target, String candidate) {
@@ -195,7 +266,7 @@ class SettingsController extends ChangeNotifier {
     return true;
   }
 
-  bool addNasPath(String value) {
+  bool addNasPath(String value, {String? sourceId}) {
     final trimmed = value.trim();
     if (trimmed.isEmpty) {
       return false;
@@ -203,6 +274,12 @@ class SettingsController extends ChangeNotifier {
     final added = _addUniquePath(_nasPaths, trimmed);
     if (!added) {
       return false;
+    }
+    if (_databaseService.isOpen) {
+      _databaseService.ensureMediaSource(
+        trimmed,
+        preferredSourceId: sourceId,
+      );
     }
     save();
     return true;
@@ -319,19 +396,87 @@ class SettingsController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> resetDatabase() async {
-    _databaseService.resetDatabase();
-    _nasPaths = [];
-    _effectMode = EffectMode.glass;
-    _perDeviceEffect = true;
-    _subtitlesEnabledByDefault = false;
-    _preferredSubtitleLanguage = AppStrings.subtitleLangCodeDe;
-    _subtitleScale = AppSpacing.subtitleScaleDefault;
-    _subtitlePosition = AppSpacing.subtitlePositionDefault;
-    _subtitleBgOpacity = AppSpacing.subtitleBgOpacityDefault;
-    _hardwareAccelerationEnabled = true;
-    await clearThumbnailCache();
+  Future<BackupResult> resetDatabaseWithBackup({
+    bool requireBackup = true,
+    Future<void> Function()? onStopJobs,
+  }) async {
+    _isMaintenanceInProgress = true;
     _safeNotify();
+    try {
+      if (onStopJobs != null) {
+        await onStopJobs();
+      }
+      await _syncService.waitForIdle();
+
+      BackupResult backupResult = const BackupResult(success: true);
+      if (requireBackup) {
+        backupResult = await _backupService.createBackup(
+          _databaseService,
+          reason: 'pre_reset',
+        );
+        if (!backupResult.success) {
+          return backupResult;
+        }
+        _latestBackup = backupResult.backupInfo;
+      }
+
+      _databaseService.resetDatabase();
+      _nasPaths = [];
+      _effectMode = EffectMode.glass;
+      _perDeviceEffect = true;
+      _subtitlesEnabledByDefault = false;
+      _preferredSubtitleLanguage = AppStrings.subtitleLangCodeDe;
+      _subtitleScale = AppSpacing.subtitleScaleDefault;
+      _subtitlePosition = AppSpacing.subtitlePositionDefault;
+      _subtitleBgOpacity = AppSpacing.subtitleBgOpacityDefault;
+      _hardwareAccelerationEnabled = true;
+
+      final clearResult = await _cacheService.clearCacheWithResult(
+        _databaseService,
+      );
+      _cacheBytes = clearResult.remainingBytes;
+      _latestBackup = await _backupService.latestBackup();
+      return backupResult;
+    } finally {
+      _isMaintenanceInProgress = false;
+      _safeNotify();
+    }
+  }
+
+  Future<void> resetDatabase() async {
+    final result = await resetDatabaseWithBackup(requireBackup: true);
+    if (!result.success) {
+      throw StateError(
+        result.errorMessage ?? AppStrings.backupFailedStatus,
+      );
+    }
+  }
+
+  Future<RestoreResult> restoreBackupFromPath(
+    String backupPath, {
+    Future<void> Function()? onStopJobs,
+  }) async {
+    _isMaintenanceInProgress = true;
+    _safeNotify();
+    try {
+      if (onStopJobs != null) {
+        await onStopJobs();
+      }
+      await _syncService.waitForIdle();
+      final result = await _backupService.restoreBackup(
+        _databaseService,
+        backupPath,
+      );
+      if (result.success) {
+        await load();
+      } else {
+        await refreshLatestBackup();
+      }
+      return result;
+    } finally {
+      _isMaintenanceInProgress = false;
+      _safeNotify();
+    }
   }
 
   void _safeNotify() {

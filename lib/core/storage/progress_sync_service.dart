@@ -2,24 +2,38 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:path/path.dart' as p;
-import 'package:sqlite3/sqlite3.dart';
 import 'database_service.dart';
 import 'portable_paths.dart';
+import 'sync_lock.dart';
+import 'sync_merge_store.dart';
+import 'sync_models.dart';
+import 'sync_validator.dart';
 
-class SyncResult {
-  const SyncResult({
-    required this.syncedToNas,
-    required this.targetPath,
-  });
-
-  final bool syncedToNas;
-  final String targetPath;
-}
+export 'sync_models.dart';
 
 class ProgressSyncService {
-  ProgressSyncService(this._databaseService);
+  ProgressSyncService(
+    this._databaseService, {
+    StorageLayout? storageLayout,
+    String? writerId,
+    Duration lockStaleTimeout = SyncSchema.defaultLockStaleTimeout,
+    Duration lockAcquireTimeout = SyncSchema.defaultLockAcquireTimeout,
+    int maxRetries = SyncSchema.maxConflictRetries,
+  })  : _storageLayout = storageLayout,
+        _writerId = (writerId != null && writerId.trim().isNotEmpty)
+            ? writerId.trim()
+            : '${Platform.localHostname}_$pid',
+        _lockStaleTimeout = lockStaleTimeout,
+        _lockAcquireTimeout = lockAcquireTimeout,
+        _maxRetries = maxRetries < 1 ? 1 : maxRetries;
 
   final DatabaseService _databaseService;
+  final StorageLayout? _storageLayout;
+  final String _writerId;
+  final Duration _lockStaleTimeout;
+  final Duration _lockAcquireTimeout;
+  final int _maxRetries;
+
   static const String _syncFileName = 'progress_sync.json';
   Future<void> _syncQueue = Future<void>.value();
 
@@ -60,7 +74,8 @@ class ProgressSyncService {
         return (path: p.join(trimmed, _syncFileName), isNas: true);
       }
     }
-    final dataDir = await PortablePaths.getDataDirectory();
+    final dataDir =
+        _storageLayout?.dataDirectory ?? await PortablePaths.getDataDirectory();
     return (path: p.join(dataDir, _syncFileName), isNas: false);
   }
 
@@ -69,294 +84,249 @@ class ProgressSyncService {
       for (final root in nasRootPaths) {
         final trimmed = root.trim();
         if (trimmed.isNotEmpty && await Directory(trimmed).exists()) {
-          return _performSync(trimmed);
+          return _performSyncWithRetry(trimmed);
         }
       }
-      return _performSync('');
+      return _performSyncWithRetry('');
     });
   }
 
   Future<SyncResult> syncWithStorage(String nasRootPath) {
-    return _enqueue(() => _performSync(nasRootPath));
+    return _enqueue(() => _performSyncWithRetry(nasRootPath));
   }
 
-  Future<SyncResult> _performSync(String nasRootPath) async {
+  Future<void> waitForIdle() {
+    return _enqueue(() async {});
+  }
+
+  Future<SyncResult> recoverValidEntriesFromFile(String filePath) {
+    return _enqueue(() async {
+      if (!_databaseService.isOpen) {
+        return SyncResult(
+          syncedToNas: false,
+          targetPath: filePath,
+          status: SyncStatus.failed,
+          message: 'Datenbank nicht geöffnet.',
+        );
+      }
+      final file = File(filePath);
+      if (!await file.exists()) {
+        return SyncResult(
+          syncedToNas: false,
+          targetPath: filePath,
+          status: SyncStatus.failed,
+          message: 'Recovery-Datei nicht gefunden.',
+        );
+      }
+      final List<int> bytes;
+      try {
+        bytes = await file.readAsBytes();
+      } on FileSystemException catch (error) {
+        return SyncResult(
+          syncedToNas: false,
+          targetPath: filePath,
+          status: SyncStatus.failed,
+          message: error.message,
+        );
+      }
+      final parse = SyncValidator.parseFileBytes(bytes);
+      if (!parse.isOk) {
+        return SyncResult(
+          syncedToNas: false,
+          targetPath: filePath,
+          status: parse.status == SyncParseStatus.incompatibleVersion
+              ? SyncStatus.incompatibleVersion
+              : SyncStatus.corrupt,
+          message: parse.errorMessage,
+          validationIssues: parse.issues,
+        );
+      }
+      final db = _databaseService.instance;
+      final v1ToV2 = SyncMergeStore.buildLegacyV1ToV2Map(db);
+      final normalizedRemote =
+          SyncMergeStore.remapEntries(parse.document!.entries, v1ToV2);
+      final localRows = SyncMergeStore.loadLocalEntries(db);
+      final merged =
+          SyncMergeStore.mergeAndPersistToDb(db, localRows, normalizedRemote);
+      return SyncResult(
+        syncedToNas: false,
+        targetPath: filePath,
+        status: SyncStatus.localOnly,
+        isolatedEntryCount: parse.issues.length,
+        validationIssues: parse.issues,
+        generation: parse.document!.generation,
+        mergedEntryCount: merged.length,
+      );
+    });
+  }
+
+  Future<SyncResult> _performSyncWithRetry(String nasRootPath) async {
+    SyncResult? lastConflict;
+    for (var attempt = 0; attempt < _maxRetries; attempt++) {
+      final res = await _performSyncOnce(nasRootPath);
+      if (res.status != SyncStatus.conflict) {
+        return res;
+      }
+      lastConflict = res;
+      await Future<void>.delayed(Duration(milliseconds: 20 * (attempt + 1)));
+    }
+    return lastConflict ??
+        const SyncResult(
+          syncedToNas: false,
+          targetPath: '',
+          status: SyncStatus.conflict,
+          message: 'Sync-Lock konnte nicht erworben werden.',
+        );
+  }
+
+  Future<SyncResult> _performSyncOnce(String nasRootPath) async {
     if (!_databaseService.isOpen) {
-      return const SyncResult(syncedToNas: false, targetPath: '');
+      return const SyncResult(
+        syncedToNas: false,
+        targetPath: '',
+        status: SyncStatus.failed,
+        message: 'Datenbank nicht geöffnet.',
+      );
     }
     final target = await _resolveSyncTarget(nasRootPath);
     if (!_databaseService.isOpen) {
-      return SyncResult(syncedToNas: false, targetPath: target.path);
+      return SyncResult(
+        syncedToNas: false,
+        targetPath: target.path,
+        status: SyncStatus.failed,
+      );
     }
     final syncPath = target.path;
-    final syncFile = File(syncPath);
-    final db = _databaseService.instance;
 
-    final remoteEntries = <String, Map<String, dynamic>>{};
-
-    if (await syncFile.exists()) {
-      try {
-        final raw = await syncFile.readAsString();
-        final decoded = jsonDecode(raw);
-        if (decoded is Map<String, dynamic>) {
-          final items = decoded['entries'];
-          if (items is Map<String, dynamic>) {
-            for (final entry in items.entries) {
-              if (entry.value is Map<String, dynamic>) {
-                remoteEntries[entry.key] = Map<String, dynamic>.from(
-                  entry.value as Map<String, dynamic>,
-                );
-              }
-            }
-          }
-        }
-      } on FileSystemException {
-        // Lokalen Stand beibehalten, falls Netzzugriff kurz unterbrochen ist
-      } on FormatException {
-        // Beschädigte Sync-Datei nicht zum Absturz führen lassen
-      }
-    }
-
-    if (!_databaseService.isOpen) {
-      return SyncResult(syncedToNas: false, targetPath: syncPath);
-    }
-
-    _normalizeLocalLegacyKeys(db);
-
-    final localRows = db.select(
-      '''
-      SELECT media_key, media_type, position_ms, duration_ms, completed, updated_at, source_device
-      FROM watch_progress;
-      ''',
+    final lock = await SyncFileLock.acquire(
+      syncPath,
+      writerId: _writerId,
+      staleTimeout: _lockStaleTimeout,
+      acquireTimeout: _lockAcquireTimeout,
     );
-
-    final mergedEntries = <String, Map<String, dynamic>>{...remoteEntries};
-    final localKeys = <String>{
-      for (final row in localRows) row['media_key'] as String,
-    };
-
-    db.execute('BEGIN TRANSACTION;');
-    try {
-      for (final row in localRows) {
-        final key = row['media_key'] as String;
-        final localUpdated = row['updated_at'] as int;
-        final localMap = {
-          'media_type': row['media_type'] as String,
-          'position_ms': row['position_ms'] as int,
-          'duration_ms': row['duration_ms'] as int,
-          'completed': (row['completed'] as int) == 1,
-          'updated_at': localUpdated,
-          'source_device': row['source_device'] as String,
-        };
-
-        final existingRemote = mergedEntries[key];
-        final remoteUpdated = _asInt(existingRemote?['updated_at']);
-
-        if (existingRemote == null || localUpdated >= remoteUpdated) {
-          mergedEntries[key] = localMap;
-        } else {
-          final remotePos = _asInt(existingRemote['position_ms']);
-          final remoteDur = _asInt(existingRemote['duration_ms']);
-          final remoteCompleted = _asBool(existingRemote['completed']) ? 1 : 0;
-          final remoteDevice =
-              _asString(existingRemote['source_device'], fallback: 'remote');
-          final remoteType =
-              _asString(existingRemote['media_type'], fallback: 'episode');
-
-          db.execute(
-            '''
-            INSERT INTO watch_progress (
-              media_key, media_type, position_ms, duration_ms, completed, updated_at, source_device
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(media_key) DO UPDATE SET
-              media_type = excluded.media_type,
-              position_ms = excluded.position_ms,
-              duration_ms = excluded.duration_ms,
-              completed = excluded.completed,
-              updated_at = excluded.updated_at,
-              source_device = excluded.source_device;
-            ''',
-            [
-              key,
-              remoteType,
-              remotePos,
-              remoteDur,
-              remoteCompleted,
-              remoteUpdated,
-              remoteDevice,
-            ],
-          );
-        }
-      }
-
-      for (final entry in remoteEntries.entries) {
-        final key = entry.key;
-        final remoteMap = entry.value;
-        final remoteUpdated = _asInt(remoteMap['updated_at']);
-        final alreadyInLocal = localKeys.contains(key);
-
-        if (!alreadyInLocal) {
-          final remotePos = _asInt(remoteMap['position_ms']);
-          final remoteDur = _asInt(remoteMap['duration_ms']);
-          final remoteCompleted = _asBool(remoteMap['completed']) ? 1 : 0;
-          final remoteDevice =
-              _asString(remoteMap['source_device'], fallback: 'remote');
-          final remoteType =
-              _asString(remoteMap['media_type'], fallback: 'episode');
-
-          db.execute(
-            '''
-            INSERT OR IGNORE INTO watch_progress (
-              media_key, media_type, position_ms, duration_ms, completed, updated_at, source_device
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?);
-            ''',
-            [
-              key,
-              remoteType,
-              remotePos,
-              remoteDur,
-              remoteCompleted,
-              remoteUpdated,
-              remoteDevice,
-            ],
-          );
-        }
-      }
-
-      db.execute('COMMIT;');
-    } catch (_) {
-      db.execute('ROLLBACK;');
-      rethrow;
+    if (lock == null) {
+      return SyncResult(
+        syncedToNas: false,
+        targetPath: syncPath,
+        status: SyncStatus.conflict,
+        message: 'Sync-Datei wird aktuell von einem anderen Gerät beschrieben.',
+      );
     }
 
-    var writeSucceeded = false;
-    final tmpFile = File('$syncPath.tmp');
     try {
-      final payload = jsonEncode({
-        'version': 1,
-        'updated_at': DateTime.now().millisecondsSinceEpoch,
-        'entries': mergedEntries,
-      });
-      await tmpFile.writeAsString(payload, flush: true);
-      await tmpFile.rename(syncPath);
-      writeSucceeded = true;
-    } on FileSystemException {
-      if (await tmpFile.exists()) {
+      if (!_databaseService.isOpen) {
+        return SyncResult(
+          syncedToNas: false,
+          targetPath: syncPath,
+          status: SyncStatus.failed,
+        );
+      }
+
+      final syncFile = File(syncPath);
+      SyncDocument? remoteDoc;
+      var issues = const <SyncValidationIssue>[];
+
+      if (await syncFile.exists()) {
+        final List<int> bytes;
         try {
-          await tmpFile.delete();
-        } on FileSystemException {
-          // Best-effort Cleanup fehlgeschlagener Temp-Datei
-        }
-      }
-    }
-
-    return SyncResult(
-      syncedToNas: target.isNas && writeSucceeded,
-      targetPath: syncPath,
-    );
-  }
-
-  void _normalizeLocalLegacyKeys(Database db) {
-    final mappings = <(String legacyKey, String syncKey)>[];
-    final epRows = db.select(
-      "SELECT id, sync_key FROM episodes WHERE sync_key IS NOT NULL AND sync_key != '';",
-    );
-    for (final row in epRows) {
-      mappings.add(('episode_${row['id']}', row['sync_key'] as String));
-    }
-    final mvRows = db.select(
-      "SELECT id, sync_key FROM movies WHERE sync_key IS NOT NULL AND sync_key != '';",
-    );
-    for (final row in mvRows) {
-      mappings.add(('movie_${row['id']}', row['sync_key'] as String));
-    }
-    if (mappings.isEmpty) {
-      return;
-    }
-
-    db.execute('BEGIN TRANSACTION;');
-    try {
-      for (final (legacyKey, syncKey) in mappings) {
-        final legacyRows = db.select(
-          'SELECT * FROM watch_progress WHERE media_key = ? LIMIT 1;',
-          [legacyKey],
-        );
-        if (legacyRows.isEmpty) continue;
-        final existingNew = db.select(
-          'SELECT updated_at FROM watch_progress WHERE media_key = ? LIMIT 1;',
-          [syncKey],
-        );
-        if (existingNew.isEmpty) {
-          db.execute(
-            'UPDATE watch_progress SET media_key = ? WHERE media_key = ?;',
-            [syncKey, legacyKey],
-          );
-        } else {
-          final oldRow = legacyRows.first;
-          final oldUpdated = (oldRow['updated_at'] as int?) ?? 0;
-          final newUpdated = (existingNew.first['updated_at'] as int?) ?? 0;
-          if (oldUpdated > newUpdated) {
-            db.execute(
-              '''
-              UPDATE watch_progress
-              SET position_ms = ?, duration_ms = ?, completed = ?, updated_at = ?, source_device = ?
-              WHERE media_key = ?;
-              ''',
-              [
-                oldRow['position_ms'],
-                oldRow['duration_ms'],
-                oldRow['completed'],
-                oldUpdated,
-                oldRow['source_device'],
-                syncKey,
-              ],
-            );
-          }
-          db.execute(
-            'DELETE FROM watch_progress WHERE media_key = ?;',
-            [legacyKey],
+          bytes = await syncFile.readAsBytes();
+        } on FileSystemException catch (error) {
+          return SyncResult(
+            syncedToNas: false,
+            targetPath: syncPath,
+            status: SyncStatus.failed,
+            message: 'Sync-Datei konnte nicht gelesen werden: ${error.message}',
           );
         }
+
+        final parsed = SyncValidator.parseFileBytes(bytes);
+        if (!parsed.isOk) {
+          final backupPath =
+              await SyncAtomicFileStore.createCorruptDiagnosticCopy(syncPath);
+          final status = parsed.status == SyncParseStatus.incompatibleVersion
+              ? SyncStatus.incompatibleVersion
+              : SyncStatus.corrupt;
+          return SyncResult(
+            syncedToNas: false,
+            targetPath: syncPath,
+            status: status,
+            message: parsed.errorMessage,
+            corruptBackupPath: backupPath,
+            validationIssues: parsed.issues,
+          );
+        }
+        remoteDoc = parsed.document!;
+        issues = parsed.issues;
       }
-      db.execute('COMMIT;');
-    } catch (_) {
-      db.execute('ROLLBACK;');
-      rethrow;
-    }
-  }
 
-  static int _asInt(Object? value, {int fallback = 0}) {
-    if (value is int) {
-      return value;
-    }
-    if (value is num) {
-      return value.round();
-    }
-    if (value is String) {
-      return int.tryParse(value) ?? fallback;
-    }
-    return fallback;
-  }
+      if (!_databaseService.isOpen) {
+        return SyncResult(
+          syncedToNas: false,
+          targetPath: syncPath,
+          status: SyncStatus.failed,
+        );
+      }
 
-  static bool _asBool(Object? value) {
-    if (value is bool) {
-      return value;
-    }
-    if (value is num) {
-      return value != 0;
-    }
-    if (value is String) {
-      return value.toLowerCase() == 'true' || value == '1';
-    }
-    return false;
-  }
+      final db = _databaseService.instance;
+      SyncMergeStore.normalizeLocalLegacyKeys(db);
+      final v1ToV2 = SyncMergeStore.buildLegacyV1ToV2Map(db);
+      final remoteEntries = remoteDoc == null
+          ? const <String, SyncEntry>{}
+          : SyncMergeStore.remapEntries(remoteDoc.entries, v1ToV2);
+      final localEntries = SyncMergeStore.loadLocalEntries(db);
+      final mergedEntries = SyncMergeStore.mergeAndPersistToDb(
+        db,
+        localEntries,
+        remoteEntries,
+      );
 
-  static String _asString(Object? value, {required String fallback}) {
-    if (value is String && value.trim().isNotEmpty) {
-      return value;
+      final nextGeneration = (remoteDoc?.generation ?? 0) + 1;
+      final payloadJson = jsonEncode({
+        'version': SyncSchema.currentVersion,
+        'updated_at': DateTime.now().millisecondsSinceEpoch,
+        'generation': nextGeneration,
+        'writer_id': _writerId,
+        'entries': {
+          for (final entry in mergedEntries.entries)
+            entry.key: entry.value.toJson(),
+        },
+      });
+
+      String? writeError;
+      try {
+        await SyncAtomicFileStore.writeValidatedAtomically(
+          syncPath: syncPath,
+          payloadJson: payloadJson,
+          writerId: _writerId,
+        );
+      } on FileSystemException catch (error) {
+        writeError = error.message;
+      }
+
+      if (writeError != null) {
+        return SyncResult(
+          syncedToNas: false,
+          targetPath: syncPath,
+          status: SyncStatus.failed,
+          message: writeError,
+          isolatedEntryCount: issues.length,
+          validationIssues: issues,
+          generation: remoteDoc?.generation ?? 0,
+          mergedEntryCount: mergedEntries.length,
+        );
+      }
+
+      return SyncResult(
+        syncedToNas: target.isNas,
+        targetPath: syncPath,
+        status: target.isNas ? SyncStatus.synced : SyncStatus.localOnly,
+        isolatedEntryCount: issues.length,
+        validationIssues: issues,
+        generation: nextGeneration,
+        mergedEntryCount: mergedEntries.length,
+      );
+    } finally {
+      await lock.release();
     }
-    return fallback;
   }
 }

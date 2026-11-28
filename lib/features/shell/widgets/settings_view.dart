@@ -25,6 +25,10 @@ class SettingsView extends StatelessWidget {
     required this.onSyncNow,
     required this.onClearCache,
     required this.onResetDatabase,
+    this.onRetryFailedThumbnails,
+    this.onCreateBackup,
+    this.onRestoreBackup,
+    this.isBusy = false,
   });
 
   final SettingsController settingsController;
@@ -40,6 +44,10 @@ class SettingsView extends StatelessWidget {
   final VoidCallback onSyncNow;
   final VoidCallback onClearCache;
   final VoidCallback onResetDatabase;
+  final VoidCallback? onRetryFailedThumbnails;
+  final VoidCallback? onCreateBackup;
+  final VoidCallback? onRestoreBackup;
+  final bool isBusy;
 
   @override
   Widget build(BuildContext context) {
@@ -86,9 +94,14 @@ class SettingsView extends StatelessWidget {
     );
     final syncCard = SettingsSyncCard(
       settingsController: settingsController,
+      libraryController: libraryController,
       onSyncNow: onSyncNow,
       onClearCache: onClearCache,
       onResetDatabase: onResetDatabase,
+      onRetryFailedThumbnails: onRetryFailedThumbnails,
+      onCreateBackup: onCreateBackup,
+      onRestoreBackup: onRestoreBackup,
+      isBusy: isBusy,
     );
 
     return LayoutBuilder(

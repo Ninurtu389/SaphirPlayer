@@ -7,7 +7,7 @@
 ## Kernfunktionen
 
 - **Serverloser NAS- & Lokal-Betrieb:** Alle Mediendateien bleiben unverändert auf dem NAS oder lokalen Ordnern. Ein lokaler SQLite-Index (`sqlite3`) sorgt für schnelle Ladezeiten auch bei Offline-NAS.
-- **Portabler Modus:** Liegt neben der ausführbaren Datei eine `portable.flag` oder ein `data/`-Ordner, werden Datenbank, Einstellungen und Thumbnail-Cache relativ zum Programmordner gespeichert.
+- **Portabler Modus:** Liegt neben der ausführbaren Datei eine `portable.flag`, werden Datenbank, Einstellungen und Thumbnail-Cache relativ zum Programmordner gespeichert. Andernfalls liegen alle App-Daten im Benutzer-Anwendungsdatenordner (`SaphirPlayer`).
 - **Multi-Geräte-Sync:** Dateibasierter Fortschrittsabgleich über `progress_sync.json` (Zeitstempel-Merge pro `media_key`).
 - **Home-Hub & Bibliothek:** Hero-Banner, horizontale Karussells (*Weiterschauen*, *Zuletzt hinzugefügt*, *Schon lange nicht mehr gesehen* > 60 Tage), globale Live-Suche, Filter (*Alle / Serien / Filme*) und Zufallsvorschlag.
 - **Serien-Detailansicht:** Staffel-Tabs, Episodenliste mit 16:9-Vorschaubildern, Laufzeit, Fortschrittsbalken, „Gesehen“-Toggle sowie Metadaten aus `info.json` oder `tvshow.nfo`.

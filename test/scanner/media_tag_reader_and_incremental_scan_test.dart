@@ -241,7 +241,8 @@ void main() {
   });
 
   group('Incremental NAS scan & isolate pipeline', () {
-    test('skips tagReader when file_size and modified_at are unchanged and re-reads on change',
+    test(
+        'skips tagReader when file_size and modified_at are unchanged and re-reads on change',
         () async {
       final env = await TestEnv.create();
       addTearDown(env.dispose);
@@ -271,7 +272,8 @@ void main() {
       expect(readCalls, 1);
 
       final row1 = env.dbService.instance
-          .select('SELECT title, artist, duration_ms, file_size, modified_at FROM movies;')
+          .select(
+              'SELECT title, artist, duration_ms, file_size, modified_at FROM movies;')
           .first;
       expect(row1['title'], 'Blade Runner');
       expect(row1['artist'], 'Ridley Scott');
@@ -304,7 +306,8 @@ void main() {
       expect(readCalls, 2);
 
       final row3 = env.dbService.instance
-          .select('SELECT title, artist, release_year, duration_ms FROM movies;')
+          .select(
+              'SELECT title, artist, release_year, duration_ms FROM movies;')
           .first;
       expect(row3['title'], 'Blade Runner (Final Cut)');
       expect(row3['artist'], 'Ridley Scott HD');
@@ -312,7 +315,8 @@ void main() {
       expect(row3['duration_ms'], 7050000);
     });
 
-    test('reads synthetic MKV tags inside real Isolate.run and writes series summary fallback',
+    test(
+        'reads synthetic MKV tags inside real Isolate.run and writes series summary fallback',
         () async {
       final env = await TestEnv.create();
       addTearDown(env.dispose);
@@ -337,6 +341,8 @@ void main() {
       final res = await scanner.scanLibrary([root.path]);
       expect(res.nasReachable, isTrue);
       expect(res.seriesCount, 1);
+      expect(res.sourceReports, hasLength(1));
+      expect(res.sourceReports.single.status, SourceScanStatus.complete);
 
       final seriesRow = env.dbService.instance
           .select('SELECT title, summary FROM series;')
@@ -354,7 +360,8 @@ void main() {
   });
 
   group('Formatters & artist search in HomeController / LibraryController', () {
-    test('formatMovieSubtitle, formatEpisodeSubtitle, formatEpisodeRowMeta, formatPlayerHudSubtitle',
+    test(
+        'formatMovieSubtitle, formatEpisodeSubtitle, formatEpisodeRowMeta, formatPlayerHudSubtitle',
         () {
       expect(
         Formatters.formatMovieSubtitle(2024, 'Denis Villeneuve'),
@@ -471,7 +478,8 @@ Uint8List _buildSyntheticMkvBytes({
     }
 
     final initialSeekHead = buildSeekHead(0);
-    final tagsPos = initialSeekHead.length + infoElem.length + clusterElem.length;
+    final tagsPos =
+        initialSeekHead.length + infoElem.length + clusterElem.length;
     final seekHead = buildSeekHead(tagsPos);
     segmentBody = Uint8List.fromList([
       ...seekHead,

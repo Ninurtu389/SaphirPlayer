@@ -32,6 +32,7 @@ void main() {
           'series_preferences',
           'watch_history',
           'media_bookmarks',
+          'media_sources',
         ]),
       );
 
@@ -51,6 +52,8 @@ void main() {
           'idx_episodes_season_id',
           'idx_seasons_series_id',
           'idx_watch_progress_completed_updated',
+          'idx_episodes_thumb_queue',
+          'idx_movies_thumb_queue',
         ]),
       );
 
@@ -58,19 +61,39 @@ void main() {
       expect(fk, 1);
 
       final version = db.select('PRAGMA user_version;').first.values.first;
-      expect(version, 4);
+      expect(version, 6);
 
       final epCols = db
           .select('PRAGMA table_info(episodes);')
           .map((r) => r['name'] as String)
           .toSet();
-      expect(epCols, containsAll(['artist', 'file_size', 'modified_at']));
+      expect(
+        epCols,
+        containsAll([
+          'artist',
+          'file_size',
+          'modified_at',
+          'thumb_attempts',
+          'thumb_last_error',
+          'thumb_retry_at',
+        ]),
+      );
 
       final mvCols = db
           .select('PRAGMA table_info(movies);')
           .map((r) => r['name'] as String)
           .toSet();
-      expect(mvCols, containsAll(['artist', 'file_size', 'modified_at']));
+      expect(
+        mvCols,
+        containsAll([
+          'artist',
+          'file_size',
+          'modified_at',
+          'thumb_attempts',
+          'thumb_last_error',
+          'thumb_retry_at',
+        ]),
+      );
     });
 
     test('throws StateError when accessed before open()', () {
@@ -121,7 +144,8 @@ void main() {
       );
     });
 
-    test('handles Unicode, special characters, and SQL injection payloads safely',
+    test(
+        'handles Unicode, special characters, and SQL injection payloads safely',
         () async {
       final env = await TestEnv.create(inMemory: true);
       addTearDown(env.dispose);
@@ -135,10 +159,9 @@ void main() {
         [trickyTitle, trickyPath],
       );
 
-      final row = db
-          .select('SELECT title, file_path FROM movies WHERE file_path = ?;',
-              [trickyPath])
-          .first;
+      final row = db.select(
+          'SELECT title, file_path FROM movies WHERE file_path = ?;',
+          [trickyPath]).first;
       expect(row['title'], trickyTitle);
       expect(row['file_path'], trickyPath);
     });
@@ -230,7 +253,8 @@ void main() {
   });
 
   group('ProgressSyncService', () {
-    test('handles corrupt JSON and wrong field types without throwing TypeError',
+    test(
+        'handles corrupt JSON and wrong field types without throwing TypeError',
         () async {
       final env = await TestEnv.create();
       addTearDown(env.dispose);
@@ -238,18 +262,29 @@ void main() {
       final syncDir = env.createSubdir('nas_sync');
       final syncFile = File(p.join(syncDir.path, 'progress_sync.json'));
 
-      // Corrupt JSON
+      // Corrupt JSON is preserved without throwing and reports corrupt status
       syncFile.writeAsStringSync('{invalid json');
       final sync = ProgressSyncService(env.dbService);
-      await sync.syncWithStorage(syncDir.path);
+      final corruptResult = await sync.syncWithStorage(syncDir.path);
+      expect(corruptResult.status, SyncStatus.corrupt);
+      expect(corruptResult.syncedToNas, isFalse);
+      expect(syncFile.readAsStringSync(), '{invalid json');
 
-      // Wrong field types inside valid JSON
+      // Mixed valid + invalid field types: invalid entry is isolated while valid entry imports cleanly
       syncFile.writeAsStringSync(
         jsonEncode({
           'version': 1,
           'entries': {
-            'episode_10': {
+            'episode_bad_type': {
               'media_type': 123,
+              'position_ms': '45000',
+              'duration_ms': 120000.4,
+              'completed': 'true',
+              'updated_at': 99999,
+              'source_device': null,
+            },
+            'episode_10': {
+              'media_type': 'episode',
               'position_ms': '45000',
               'duration_ms': 120000.4,
               'completed': 'true',
@@ -260,7 +295,13 @@ void main() {
         }),
       );
 
-      await sync.syncWithStorage(syncDir.path);
+      final result = await sync.syncWithStorage(syncDir.path);
+      expect(result.syncedToNas, isTrue);
+      expect(result.isolatedEntryCount, 1);
+      final badRows = env.dbService.instance.select(
+        "SELECT * FROM watch_progress WHERE media_key = 'episode_bad_type';",
+      );
+      expect(badRows, isEmpty);
       final rows = env.dbService.instance.select(
         "SELECT * FROM watch_progress WHERE media_key = 'episode_10';",
       );
@@ -286,7 +327,8 @@ void main() {
       );
 
       final sync = ProgressSyncService(env.dbService);
-      final syncResult = await sync.syncWithRoots([p.join(env.tempRoot.path, 'offline_nas')]);
+      final syncResult =
+          await sync.syncWithRoots([p.join(env.tempRoot.path, 'offline_nas')]);
       expect(syncResult.syncedToNas, isFalse);
 
       final localSync = File(

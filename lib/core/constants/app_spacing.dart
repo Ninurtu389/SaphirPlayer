@@ -200,4 +200,12 @@ class AppSpacing {
   static const int shutdownSyncTimeoutMs = 2500;
   static const int shutdownNativeDrainDelayMs = 250;
   static const int shutdownWindowDestroyTimeoutMs = 1000;
+
+  static const int scanDeleteGuardMinEntries = 10;
+  static const double scanDeleteGuardMaxRatio = 0.85;
+  static const int scanIsolateShutdownGraceMs = 250;
+
+  static const int thumbnailMaxRetryAttempts = 3;
+  static const int thumbnailRetryBaseSeconds = 30;
+  static const int thumbnailQueueBatchDelayMs = 250;
 }
