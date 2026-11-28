@@ -116,6 +116,8 @@ class PlayerActionOsd extends StatelessWidget {
         return Icons.menu_book_outlined;
       case PlayerActionOsdKind.introSkip:
         return Icons.fast_forward;
+      case PlayerActionOsdKind.error:
+        return Icons.error_outline;
       case null:
         return Icons.info_outline;
     }

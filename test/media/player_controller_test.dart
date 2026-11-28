@@ -50,7 +50,8 @@ void main() {
       expect(harness.openedMedia, isEmpty);
     });
 
-    test('opens valid file, seeks to startPositionMs, and handles play/pause/seek/volume/speed',
+    test(
+        'opens valid file, seeks to startPositionMs, and handles play/pause/seek/volume/speed',
         () async {
       final ep1 = createSyntheticMp4HeaderFile(mediaDir, 'ep1.mp4');
       final ep2 = createSyntheticMp4HeaderFile(mediaDir, 'ep2.mp4');
@@ -104,10 +105,12 @@ void main() {
       expect(harness.playOrPauseCount, 1);
 
       await controller.seekRelativeSeconds(10);
-      expect(harness.seekTargets.last, const Duration(minutes: 10, seconds: 10));
+      expect(
+          harness.seekTargets.last, const Duration(minutes: 10, seconds: 10));
 
       await controller.seekToRatio(0.5);
-      expect(harness.seekTargets.last, const Duration(minutes: 22, seconds: 30));
+      expect(
+          harness.seekTargets.last, const Duration(minutes: 22, seconds: 30));
 
       await controller.adjustVolume(-30);
       expect(controller.volume, 70.0);
@@ -185,7 +188,8 @@ void main() {
       }
       expect(controller.currentEntry?.mediaKey, 'episode_2');
       final ep1Prog = env.dbService.instance
-          .select("SELECT completed FROM watch_progress WHERE media_key = 'episode_1';")
+          .select(
+              "SELECT completed FROM watch_progress WHERE media_key = 'episode_1';")
           .first;
       expect(ep1Prog['completed'], 1);
 
@@ -198,7 +202,8 @@ void main() {
       expect(controller.currentEntry?.mediaKey, 'episode_1');
     });
 
-    test('persists progress >= 92% as completed and updates movie last_watched_at',
+    test(
+        'persists progress >= 92% as completed and updates movie last_watched_at',
         () async {
       final movieFile = createSyntheticMp4HeaderFile(mediaDir, 'movie.mp4');
 
@@ -279,13 +284,81 @@ void main() {
       harness.emitTracks(
         Tracks(
           audio: [AudioTrack.auto(), audioDe],
-          subtitle: [SubtitleTrack.auto(), SubtitleTrack('eng', 'English', 'en')],
+          subtitle: [
+            SubtitleTrack.auto(),
+            SubtitleTrack('eng', 'English', 'en')
+          ],
         ),
       );
       await Future<void>.delayed(Duration.zero);
 
       expect(harness.selectedAudioTracks.any((t) => t.id == 'deu'), isTrue);
       expect(harness.selectedSubtitleTracks.any((t) => t.id == 'no'), isTrue);
+    });
+
+    test(
+        'restores series audio and subtitle preferences when MPV track IDs swap between episodes',
+        () async {
+      final ep1 = createSyntheticMp4HeaderFile(mediaDir, 'ep1.mp4');
+      final ep2 = createSyntheticMp4HeaderFile(mediaDir, 'ep2.mp4');
+      await controller.startSession(
+        PlaybackSession(
+          queue: [
+            PlaybackQueueEntry(
+              mediaKey: 'episode_1',
+              mediaType: 'episode',
+              title: 'Dark',
+              subtitle: 'S1E1',
+              filePath: ep1.path,
+              seriesId: 1,
+              startPositionMs: 0,
+            ),
+            PlaybackQueueEntry(
+              mediaKey: 'episode_2',
+              mediaType: 'episode',
+              title: 'Dark',
+              subtitle: 'S1E2',
+              filePath: ep2.path,
+              seriesId: 1,
+              startPositionMs: 0,
+            ),
+          ],
+          initialIndex: 0,
+        ),
+      );
+
+      await controller.selectAudioTrack(
+        const AudioTrack('1', 'Deutsch', 'deu', codec: 'ac3', channelscount: 6),
+      );
+      await controller.selectSubtitleTrack(
+        const SubtitleTrack('5', 'English', 'eng'),
+      );
+
+      harness.selectedAudioTracks.clear();
+      harness.selectedSubtitleTracks.clear();
+
+      await controller.playNextEpisode();
+      harness.emitTracks(
+        Tracks(
+          audio: [
+            AudioTrack.auto(),
+            const AudioTrack('1', 'English', 'eng',
+                codec: 'ac3', channelscount: 6),
+            const AudioTrack('4', 'Deutsch', 'ger',
+                codec: 'ac3', channelscount: 6),
+          ],
+          subtitle: [
+            SubtitleTrack.auto(),
+            SubtitleTrack.no(),
+            const SubtitleTrack('1', 'Deutsch', 'deu'),
+            const SubtitleTrack('2', 'English', 'english'),
+          ],
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(harness.selectedAudioTracks.last.id, '4');
+      expect(harness.selectedSubtitleTracks.last.id, '2');
     });
   });
 

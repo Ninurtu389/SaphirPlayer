@@ -16,11 +16,13 @@ class ScanWorkerPayload {
     required this.rootPaths,
     required this.knownMetadata,
     this.sourceIdsByRoot = const {},
+    this.sourceLabelsByRoot = const {},
   });
 
   final List<String> rootPaths;
   final Map<String, CachedFileMeta> knownMetadata;
   final Map<String, String> sourceIdsByRoot;
+  final Map<String, String> sourceLabelsByRoot;
 }
 
 class _IsolateStartMessage {
@@ -41,6 +43,7 @@ class ScanWorker {
   static Future<ScanOutput> runInControllableIsolate(
     ScanWorkerPayload payload, {
     ScanCancellationToken? cancellationToken,
+    void Function(ScanPhase phase)? onPhaseChanged,
   }) async {
     if (cancellationToken?.isCancelled ?? false) {
       return _cancelledOutput(payload.rootPaths);
@@ -85,6 +88,8 @@ class ScanWorker {
         if (cancellationToken?.isCancelled ?? false) {
           dispatchCancelToIsolate();
         }
+      } else if (message is ScanPhase) {
+        onPhaseChanged?.call(message);
       } else if (message is ScanOutput && !resultCompleter.isCompleted) {
         resultCompleter.complete(message);
       }
@@ -164,6 +169,7 @@ class ScanWorker {
         tagReader: MediaTagReaderService.readTags,
         isCancelledOverride: () => cancelled,
         yieldPeriodically: true,
+        onPhaseChanged: (phase) => start.replyPort.send(phase),
       );
       start.replyPort.send(output);
     } finally {
@@ -180,6 +186,7 @@ class ScanWorker {
     FileStatReader? fileStatReader,
     bool Function()? isCancelledOverride,
     bool yieldPeriodically = false,
+    void Function(ScanPhase phase)? onPhaseChanged,
   }) async {
     bool isCancelled() =>
         (cancellationToken?.isCancelled ?? false) ||
@@ -196,16 +203,25 @@ class ScanWorker {
     final posterBySeries = <String, String>{};
     final folderBySeries = <String, String>{};
     final summaryBySeries = <String, String?>{};
+    final sourceIdBySeries = <String, String?>{};
     final movies = <ScannedMovieData>[];
     var anyCancelled = false;
 
     for (final rootPath in payload.rootPaths) {
+      final sourceId = payload.sourceIdsByRoot[rootPath];
+      final sourceLabel = payload.sourceLabelsByRoot[rootPath];
+      final startedAtMs = DateTime.now().millisecondsSinceEpoch;
+
       if (isCancelled()) {
         anyCancelled = true;
         sourceReports.add(
           SourceScanReport(
             rootPath: rootPath,
             status: SourceScanStatus.cancelled,
+            sourceId: sourceId,
+            label: sourceLabel,
+            startedAtMs: startedAtMs,
+            finishedAtMs: DateTime.now().millisecondsSinceEpoch,
           ),
         );
         break;
@@ -217,6 +233,10 @@ class ScanWorker {
           SourceScanReport(
             rootPath: rootPath,
             status: SourceScanStatus.unreachable,
+            sourceId: sourceId,
+            label: sourceLabel,
+            startedAtMs: startedAtMs,
+            finishedAtMs: DateTime.now().millisecondsSinceEpoch,
             errors: [
               ScanDirectoryError(
                 path: rootPath,
@@ -228,6 +248,7 @@ class ScanWorker {
         continue;
       }
 
+      onPhaseChanged?.call(ScanPhase.enumerating);
       final traversal = await _traverseRootSafely(
         rootDir,
         lister: lister,
@@ -242,6 +263,10 @@ class ScanWorker {
             status: SourceScanStatus.cancelled,
             errors: traversal.errors,
             filesExamined: traversal.files.length,
+            sourceId: sourceId,
+            label: sourceLabel,
+            startedAtMs: startedAtMs,
+            finishedAtMs: DateTime.now().millisecondsSinceEpoch,
           ),
         );
         break;
@@ -252,13 +277,17 @@ class ScanWorker {
             rootPath: rootPath,
             status: SourceScanStatus.unreachable,
             errors: traversal.errors,
+            sourceId: sourceId,
+            label: sourceLabel,
+            startedAtMs: startedAtMs,
+            finishedAtMs: DateTime.now().millisecondsSinceEpoch,
           ),
         );
         continue;
       }
 
+      onPhaseChanged?.call(ScanPhase.readingMetadata);
       final rootErrors = List<ScanDirectoryError>.of(traversal.errors);
-      final sourceId = payload.sourceIdsByRoot[rootPath];
       var mediaFoundInRoot = 0;
       var filesExamined = 0;
 
@@ -332,6 +361,7 @@ class ScanWorker {
           );
           final key = resolved.groupKey;
           episodesBySeries.putIfAbsent(key, () => []).add(episode);
+          sourceIdBySeries.putIfAbsent(key, () => sourceId);
           folderBySeries.putIfAbsent(key, () => resolved.folderPath);
           posterBySeries.putIfAbsent(
             key,
@@ -374,6 +404,7 @@ class ScanWorker {
               durationMs: parsed.durationMs,
               fileSize: parsed.fileSize,
               modifiedAt: parsed.modifiedAt,
+              sourceId: sourceId,
             ),
           );
         }
@@ -387,6 +418,10 @@ class ScanWorker {
             errors: rootErrors,
             filesExamined: filesExamined,
             mediaFound: mediaFoundInRoot,
+            sourceId: sourceId,
+            label: sourceLabel,
+            startedAtMs: startedAtMs,
+            finishedAtMs: DateTime.now().millisecondsSinceEpoch,
           ),
         );
         break;
@@ -406,6 +441,10 @@ class ScanWorker {
           errors: rootErrors,
           filesExamined: filesExamined,
           mediaFound: mediaFoundInRoot,
+          sourceId: sourceId,
+          label: sourceLabel,
+          startedAtMs: startedAtMs,
+          finishedAtMs: DateTime.now().millisecondsSinceEpoch,
         ),
       );
     }
@@ -418,6 +457,7 @@ class ScanWorker {
         seriesList: const [],
         movies: const [],
         sourceReports: sourceReports,
+        sourceIdsByRoot: payload.sourceIdsByRoot,
         wasCancelled: true,
       );
     }
@@ -430,6 +470,7 @@ class ScanWorker {
         seriesList: const [],
         movies: const [],
         sourceReports: sourceReports,
+        sourceIdsByRoot: payload.sourceIdsByRoot,
       );
     }
 
@@ -449,6 +490,7 @@ class ScanWorker {
               (posterRaw != null && posterRaw.isNotEmpty) ? posterRaw : null,
           summary: summaryBySeries[key],
           episodes: eps,
+          sourceId: sourceIdBySeries[key],
         ),
       );
     }
@@ -460,6 +502,7 @@ class ScanWorker {
       seriesList: seriesList,
       movies: movies,
       sourceReports: sourceReports,
+      sourceIdsByRoot: payload.sourceIdsByRoot,
     );
   }
 

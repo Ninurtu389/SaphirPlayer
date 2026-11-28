@@ -131,7 +131,7 @@ class ThumbnailQueueService {
     _continueTimer?.cancel();
     _continueTimer = null;
     _resumeAfterPlayback = false;
-    ThumbnailGeneratorService.killActiveProcesses();
+    await ThumbnailGeneratorService.terminateActiveProcesses();
     final active = _activeBatch;
     if (active != null) {
       try {

@@ -8,9 +8,9 @@ import '../../../core/utils/formatters.dart';
 import '../saphir_player_controller.dart';
 import 'player_subtitle_style_dialog.dart';
 
-enum _AudioAction { nightMode, volumeBoost }
+enum _AudioAction { auto, nightMode, volumeBoost }
 
-enum _SubtitleAction { off, loadExternal, openStyle }
+enum _SubtitleAction { auto, off, loadExternal, openStyle }
 
 class PlayerAudioTrackMenu extends StatelessWidget {
   const PlayerAudioTrackMenu({
@@ -41,6 +41,8 @@ class PlayerAudioTrackMenu extends StatelessWidget {
         _closeMenu();
         if (value is AudioTrack) {
           controller.selectAudioTrack(value);
+        } else if (value == _AudioAction.auto) {
+          controller.selectAudioTrack(AudioTrack.auto());
         } else if (value == _AudioAction.nightMode) {
           controller.toggleNightMode();
         } else if (value == _AudioAction.volumeBoost) {
@@ -48,6 +50,20 @@ class PlayerAudioTrackMenu extends StatelessWidget {
         }
       },
       itemBuilder: (context) => [
+        PopupMenuItem<Object>(
+          value: _AudioAction.auto,
+          child: Text(
+            AppStrings.playerTrackAutoLabel,
+            style: TextStyle(
+              color: controller.activeAudioTrack.id == 'auto'
+                  ? AppColors.sapphireBright
+                  : AppColors.textPrimary,
+              fontWeight: controller.activeAudioTrack.id == 'auto'
+                  ? FontWeight.w600
+                  : FontWeight.w400,
+            ),
+          ),
+        ),
         ...tracks.map(
           (track) => PopupMenuItem<Object>(
             value: track,
@@ -65,7 +81,7 @@ class PlayerAudioTrackMenu extends StatelessWidget {
             ),
           ),
         ),
-        if (tracks.isNotEmpty) const PopupMenuDivider(),
+        const PopupMenuDivider(),
         PopupMenuItem<Object>(
           value: _AudioAction.nightMode,
           child: PlayerMenuCheckRow(
@@ -145,6 +161,8 @@ class PlayerSubtitleTrackMenu extends StatelessWidget {
         _closeMenu();
         if (value is SubtitleTrack) {
           controller.selectSubtitleTrack(value);
+        } else if (value == _SubtitleAction.auto) {
+          controller.selectSubtitleTrack(SubtitleTrack.auto());
         } else if (value == _SubtitleAction.off) {
           controller.selectSubtitleTrack(SubtitleTrack.no());
         } else if (value == _SubtitleAction.loadExternal) {
@@ -153,7 +171,30 @@ class PlayerSubtitleTrackMenu extends StatelessWidget {
               .whenComplete(() => onReturnFocus?.call());
         }
       },
-      itemBuilder: (context) => [
+      itemBuilder: (context) => _buildMenuItems(context, tracks, isOff),
+    );
+  }
+
+  List<PopupMenuEntry<Object>> _buildMenuItems(
+    BuildContext context,
+    List<SubtitleTrack> tracks,
+    bool isOff,
+  ) =>
+      [
+        PopupMenuItem<Object>(
+          value: _SubtitleAction.auto,
+          child: Text(
+            AppStrings.playerTrackAutoLabel,
+            style: TextStyle(
+              color: controller.activeSubtitleTrack.id == 'auto'
+                  ? AppColors.sapphireBright
+                  : AppColors.textPrimary,
+              fontWeight: controller.activeSubtitleTrack.id == 'auto'
+                  ? FontWeight.w600
+                  : FontWeight.w400,
+            ),
+          ),
+        ),
         PopupMenuItem<Object>(
           value: _SubtitleAction.off,
           child: Text(
@@ -206,9 +247,7 @@ class PlayerSubtitleTrackMenu extends StatelessWidget {
             ),
           ),
         ),
-      ],
-    );
-  }
+      ];
 }
 
 class PlayerMenuCheckRow extends StatelessWidget {

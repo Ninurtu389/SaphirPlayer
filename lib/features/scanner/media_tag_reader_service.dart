@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import '../../core/constants/app_spacing.dart';
+import 'active_process_registry.dart';
 import 'mkv_ebml_tag_parser.dart';
 
 class EmbeddedMediaTags {
@@ -101,8 +102,9 @@ class MediaTagReaderService {
         const ['-version'],
         runInShell: false,
       );
-      unawaited(process.stdout.drain<void>());
-      unawaited(process.stderr.drain<void>());
+      ActiveProcessRegistry.register(process);
+      unawaited(process.stdout.drain<void>().catchError((_) {}));
+      unawaited(process.stderr.drain<void>().catchError((_) {}));
       final code = await process.exitCode.timeout(
         const Duration(seconds: AppSpacing.executableProbeTimeoutSeconds),
       );
@@ -112,6 +114,8 @@ class MediaTagReaderService {
       _cachedFfprobeExe = null;
     } on ProcessException {
       _cachedFfprobeExe = null;
+    } finally {
+      if (process != null) ActiveProcessRegistry.unregister(process);
     }
     _ffprobeResolved = true;
     return _cachedFfprobeExe;
@@ -129,9 +133,12 @@ class MediaTagReaderService {
         ['-v', 'quiet', '-print_format', 'json', '-show_format', filePath],
         runInShell: false,
       );
-      final stdoutFuture =
-          process.stdout.transform(const Utf8Decoder(allowMalformed: true)).join();
-      unawaited(process.stderr.drain<void>());
+      ActiveProcessRegistry.register(process);
+      final stdoutFuture = process.stdout
+          .transform(const Utf8Decoder(allowMalformed: true))
+          .join()
+          .catchError((_) => '');
+      unawaited(process.stderr.drain<void>().catchError((_) {}));
       final exitCode = await process.exitCode.timeout(
         const Duration(seconds: AppSpacing.ffprobeTimeoutSeconds),
       );
@@ -144,6 +151,8 @@ class MediaTagReaderService {
       return null;
     } on ProcessException {
       return null;
+    } finally {
+      if (process != null) ActiveProcessRegistry.unregister(process);
     }
   }
 
@@ -164,7 +173,9 @@ class MediaTagReaderService {
       final rawDuration = format['duration'];
       final seconds = rawDuration is num
           ? rawDuration.toDouble()
-          : (rawDuration is String ? double.tryParse(rawDuration.trim()) : null);
+          : (rawDuration is String
+              ? double.tryParse(rawDuration.trim())
+              : null);
       if (seconds != null && seconds > 0 && seconds.isFinite) {
         durationMs = (seconds * AppSpacing.millisecondsPerSecond).round();
       }

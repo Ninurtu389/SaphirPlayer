@@ -105,9 +105,7 @@ Future<void> main() async {
     thumbnailGate: thumbnailGate,
     storageLayout: storageLayout,
   );
-  try {
-    await settingsController.load();
-  } catch (_) {}
+  await settingsController.load();
 
   final thumbnailQueue = ThumbnailQueueService(
     databaseService,
@@ -147,6 +145,7 @@ Future<void> main() async {
     playerController: playerController,
     databaseService: databaseService,
   );
+  shellController.initializeStartupState();
   shellController.attachWindowListener();
 
   runApp(
@@ -178,15 +177,9 @@ Future<void> main() async {
   }
 
   unawaited(
-    settingsController.syncProgress().then((_) {
-      if (!databaseService!.isOpen || shellController.isClosing) return;
-      libraryController.loadCountsFromCache();
-      homeController.refreshHomeFeeds();
-      statsController.refreshStats();
-      if (!shellController.isPlayerOpen) {
-        unawaited(thumbnailQueue.processNextBatch());
-      }
-    }),
+    shellController.runStartupSync(
+      onPostSyncThumbnailBatch: () => thumbnailQueue.processNextBatch(),
+    ),
   );
 }
 

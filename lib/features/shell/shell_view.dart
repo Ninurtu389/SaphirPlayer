@@ -3,6 +3,7 @@ import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_strings.dart';
 import '../../core/controllers/library_controller.dart';
 import '../../core/controllers/settings_controller.dart';
+import '../../core/models/media_source_models.dart';
 import '../../core/theme/effect_mode.dart';
 import '../../widgets/window_title_bar.dart';
 import '../home/home_controller.dart';
@@ -15,7 +16,9 @@ import '../stats/stats_controller.dart';
 import '../stats/stats_view.dart';
 import 'shell_controller.dart';
 import 'widgets/navigation_sidebar.dart';
+import 'widgets/remove_source_dialog.dart';
 import 'widgets/settings_view.dart';
+import 'widgets/shell_startup_banner.dart';
 
 class ShellView extends StatefulWidget {
   const ShellView({
@@ -146,6 +149,20 @@ class _ShellViewState extends State<ShellView> {
     await widget.shellController.handleRestoreBackup();
   }
 
+  Future<void> _confirmRemoveSource(MediaSourceEntry source) async {
+    final action = await showDialog<SourceRemovalAction>(
+      context: context,
+      builder: (_) => RemoveSourceDialog(source: source),
+    );
+    if (action == null || !mounted) {
+      return;
+    }
+    await widget.shellController.handleRemoveMediaSource(
+      source.sourceId,
+      action,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -186,13 +203,31 @@ class _ShellViewState extends State<ShellView> {
                         activeSection: activeSection,
                         onSelectSection: widget.shellController.selectSection,
                         isScanning: widget.libraryController.isScanning,
-                        isNasOffline: widget.libraryController.statusMessage ==
-                            AppStrings.nasOfflineStatus,
+                        isNasOffline: widget.libraryController.isNasOffline,
+                        hasScanError: widget.libraryController.hasScanError,
+                        hasScanWarning: widget.libraryController.hasScanWarning,
                         statusMessage: widget.libraryController.statusMessage,
                       ),
                     ),
                     Expanded(
-                      child: _buildSectionContent(activeSection, effectMode),
+                      child: Column(
+                        children: [
+                          if (widget.shellController.startupBanner != null)
+                            ShellStartupBanner(
+                              banner: widget.shellController.startupBanner!,
+                              canRetrySync:
+                                  widget.shellController.canRetryStartupSync,
+                              onRetrySync:
+                                  widget.shellController.retryStartupSync,
+                              onDismiss:
+                                  widget.shellController.dismissStartupBanner,
+                            ),
+                          Expanded(
+                            child:
+                                _buildSectionContent(activeSection, effectMode),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -239,6 +274,7 @@ class _ShellViewState extends State<ShellView> {
             widget.homeController.buildSessionForCard(item),
           ),
           onOpenSeries: widget.shellController.openSeriesById,
+          onRetryScan: widget.shellController.triggerScan,
         );
       case AppSection.stats:
         return StatsView(
@@ -254,10 +290,15 @@ class _ShellViewState extends State<ShellView> {
             nasInputController: _nasInputController,
             effectMode: effectMode,
             statusMessage: widget.shellController.statusMessage,
+            statusBanner: widget.shellController.statusBanner,
             onAddFolderFromInput: _handleAddFolderFromInput,
             onAddFolderFromPicker:
                 widget.shellController.handleAddFolderFromPicker,
             onRemoveFolder: widget.shellController.handleRemoveFolder,
+            onRemoveSource: _confirmRemoveSource,
+            onReactivateSource:
+                widget.shellController.handleReactivateMediaSource,
+            onRescanSource: widget.shellController.handleRescanSource,
             onTriggerScan: widget.shellController.triggerScan,
             onSaveSettings: _handleSaveSettings,
             onSyncNow: widget.shellController.handleSyncNow,

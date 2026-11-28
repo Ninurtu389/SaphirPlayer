@@ -20,8 +20,22 @@ class NasScanRepository {
 
   (int, int) currentCounts() {
     final db = _databaseService.instance;
-    final seriesRow = db.select('SELECT COUNT(*) AS cnt FROM series;').first;
-    final moviesRow = db.select('SELECT COUNT(*) AS cnt FROM movies;').first;
+    final seriesRow = db.select(
+      '''
+      SELECT COUNT(*) AS cnt
+      FROM series s
+      LEFT JOIN media_sources ms ON ms.source_id = s.source_id
+      WHERE (ms.status IS NULL OR ms.status = 'active');
+      ''',
+    ).first;
+    final moviesRow = db.select(
+      '''
+      SELECT COUNT(*) AS cnt
+      FROM movies m
+      LEFT JOIN media_sources ms ON ms.source_id = m.source_id
+      WHERE (ms.status IS NULL OR ms.status = 'active');
+      ''',
+    ).first;
     return (seriesRow['cnt'] as int, moviesRow['cnt'] as int);
   }
 
@@ -141,16 +155,25 @@ class NasScanRepository {
           continue;
         }
 
+        final seriesSourceId = item.sourceId ??
+            _resolveSourceIdForPath(item.folderPath, output.sourceIdsByRoot);
         db.execute(
           '''
-          INSERT INTO series (title, folder_path, poster_path, summary)
-          VALUES (?, ?, ?, ?)
+          INSERT INTO series (title, folder_path, poster_path, summary, source_id)
+          VALUES (?, ?, ?, ?, ?)
           ON CONFLICT(folder_path) DO UPDATE SET
             title = excluded.title,
             poster_path = COALESCE(excluded.poster_path, series.poster_path),
-            summary = COALESCE(excluded.summary, series.summary);
+            summary = COALESCE(excluded.summary, series.summary),
+            source_id = COALESCE(excluded.source_id, series.source_id);
           ''',
-          [item.title, item.folderPath, item.posterPath, item.summary],
+          [
+            item.title,
+            item.folderPath,
+            item.posterPath,
+            item.summary,
+            seriesSourceId,
+          ],
         );
 
         final seriesId = db.select(
@@ -184,13 +207,15 @@ class NasScanRepository {
           }
 
           final syncKey = ep.syncKey.isEmpty ? null : ep.syncKey;
+          final epSourceId = seriesSourceId ??
+              _resolveSourceIdForPath(ep.filePath, output.sourceIdsByRoot);
           db.execute(
             '''
             INSERT INTO episodes (
               series_id, season_id, episode_number, title, file_path,
-              duration_ms, sync_key, artist, file_size, modified_at
+              duration_ms, sync_key, artist, file_size, modified_at, source_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(file_path) DO UPDATE SET
               series_id = excluded.series_id,
               season_id = excluded.season_id,
@@ -233,7 +258,8 @@ class NasScanRepository {
               END,
               artist = excluded.artist,
               file_size = excluded.file_size,
-              modified_at = excluded.modified_at;
+              modified_at = excluded.modified_at,
+              source_id = COALESCE(excluded.source_id, episodes.source_id);
             ''',
             [
               seriesId,
@@ -246,6 +272,7 @@ class NasScanRepository {
               ep.artist,
               ep.fileSize,
               ep.modifiedAt,
+              epSourceId,
             ],
           );
         }
@@ -277,13 +304,15 @@ class NasScanRepository {
         }
 
         final syncKey = movie.syncKey.isEmpty ? null : movie.syncKey;
+        final mvSourceId = movie.sourceId ??
+            _resolveSourceIdForPath(movie.filePath, output.sourceIdsByRoot);
         db.execute(
           '''
           INSERT INTO movies (
             title, release_year, file_path, poster_path,
-            duration_ms, sync_key, artist, file_size, modified_at
+            duration_ms, sync_key, artist, file_size, modified_at, source_id
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(file_path) DO UPDATE SET
             title = excluded.title,
             release_year = excluded.release_year,
@@ -325,7 +354,8 @@ class NasScanRepository {
             END,
             artist = excluded.artist,
             file_size = excluded.file_size,
-            modified_at = excluded.modified_at;
+            modified_at = excluded.modified_at,
+            source_id = COALESCE(excluded.source_id, movies.source_id);
           ''',
           [
             movie.title,
@@ -337,6 +367,7 @@ class NasScanRepository {
             movie.artist,
             movie.fileSize,
             movie.modifiedAt,
+            mvSourceId,
           ],
         );
       }
@@ -511,6 +542,28 @@ class NasScanRepository {
 
   static String? findLocalPosterNearFile(String mediaFilePath) {
     return findLocalPosterInDir(p.dirname(mediaFilePath));
+  }
+
+  static String? _resolveSourceIdForPath(
+    String filePath,
+    Map<String, String> sourceIdsByRoot,
+  ) {
+    if (sourceIdsByRoot.isEmpty) return null;
+    final normFile = p.normalize(filePath).toLowerCase();
+    String? bestId;
+    var bestLen = -1;
+    for (final entry in sourceIdsByRoot.entries) {
+      final normRoot = p.normalize(entry.key).toLowerCase();
+      if (normFile == normRoot ||
+          normFile.startsWith('$normRoot${p.separator}') ||
+          normFile.startsWith('$normRoot/')) {
+        if (normRoot.length > bestLen) {
+          bestLen = normRoot.length;
+          bestId = entry.value;
+        }
+      }
+    }
+    return bestId;
   }
 
   static bool _isPathUnderAnyRoot(String filePath, List<String> roots) {

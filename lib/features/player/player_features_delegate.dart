@@ -11,6 +11,14 @@ import 'playback_session.dart';
 import 'player_models.dart';
 import 'player_overlays_controller.dart';
 
+/// Zustandsmatrix der Player-Features:
+/// - Global persistent: SettingsController (Untertitel-Default, Sprache, Styling, HWDEC)
+/// - Pro Serie persistent: series_preferences (Tonspur, Untertitelspur, Intro-Skip-Dauer)
+/// - Pro Medium persistent: watch_progress, media_bookmarks, watch_history
+/// - Pro Eintrag transient: Position, Dauer, Fehler, Tracks, Kapitel, Intro-Dismissal,
+///   Auto-Next-Dismissal, Delays, aktives OSD, laufende Async-Reads
+/// - Pro Session transient: Sleep-Timer, Playback-Speed, Aspect-Mode, Night-Mode,
+///   Volume-Boost, geoeffnete Overlays (Drawer, Shortcut-Sheet, Diagnose)
 class PlayerFeaturesDelegate {
   PlayerFeaturesDelegate({
     required Player player,
@@ -37,7 +45,8 @@ class PlayerFeaturesDelegate {
   final PlayerWindowAdapter _windowAdapter;
   final PlayerOverlaysController _overlays;
   final SettingsController? _settingsController;
-  final Future<String?> Function(Uint8List bytes, String title) _onSaveScreenshot;
+  final Future<String?> Function(Uint8List bytes, String title)
+      _onSaveScreenshot;
   final VoidCallback _onChanged;
 
   static final RegExp _introChapterPattern = RegExp(
@@ -67,22 +76,80 @@ class PlayerFeaturesDelegate {
       ? seriesIntroSkipSeconds
       : AppSpacing.defaultIntroSkipSeconds;
 
+  int computeAutoNextRemainingSeconds({
+    required bool hasNextEpisode,
+    required bool autoNextDismissed,
+    required SleepTimerOption sleepTimerOption,
+    required Duration position,
+    required Duration duration,
+  }) {
+    if (!hasNextEpisode ||
+        autoNextDismissed ||
+        sleepTimerOption == SleepTimerOption.endOfEpisode) {
+      return 0;
+    }
+    final remainingMs = duration.inMilliseconds - position.inMilliseconds;
+    final leadMs =
+        AppSpacing.autoNextLeadSeconds * AppSpacing.millisecondsPerSecond;
+    if (duration.inMilliseconds <= 0 ||
+        remainingMs <= 0 ||
+        remainingMs > leadMs) {
+      return 0;
+    }
+    return (remainingMs / AppSpacing.millisecondsPerSecond).ceil();
+  }
+
+  bool canShowIntroSkipButton({
+    required PlaybackQueueEntry? entry,
+    required String? errorMessage,
+    required Duration position,
+    required Duration duration,
+  }) {
+    if (entry?.mediaType != 'episode' ||
+        errorMessage != null ||
+        duration <= Duration.zero ||
+        introSkipped) {
+      return false;
+    }
+    final maxWindowMs =
+        AppSpacing.introSkipWindowSeconds * AppSpacing.millisecondsPerSecond;
+    final posMs = position.inMilliseconds;
+    if (posMs >= maxWindowMs) return false;
+    if (nextChapterInIntroWindow(position) != null) return true;
+    return posMs < effectiveIntroSkipSeconds * AppSpacing.millisecondsPerSecond;
+  }
+
   double get subtitleScale =>
       _settingsController?.subtitleScale ?? AppSpacing.subtitleScaleDefault;
   int get subtitlePosition =>
-      _settingsController?.subtitlePosition ?? AppSpacing.subtitlePositionDefault;
+      _settingsController?.subtitlePosition ??
+      AppSpacing.subtitlePositionDefault;
   double get subtitleBgOpacity =>
-      _settingsController?.subtitleBgOpacity ?? AppSpacing.subtitleBgOpacityDefault;
+      _settingsController?.subtitleBgOpacity ??
+      AppSpacing.subtitleBgOpacityDefault;
 
   void resetForEntry(PlaybackQueueEntry entry) {
     chapters = const [];
     chaptersLoadedForEntry = false;
     introSkipped = false;
+    audioDelayMs = 0;
+    subtitleDelayMs = 0;
     bookmarks = _persistence.loadBookmarks(entry.mediaKey);
     seriesIntroSkipSeconds = entry.seriesId != null
-        ? (_persistence.loadSeriesPreferences(entry.seriesId!)?.introSkipSeconds ??
+        ? (_persistence
+                .loadSeriesTrackPreferences(entry.seriesId!)
+                ?.introSkipSeconds ??
             0)
         : 0;
+  }
+
+  Future<void> resetEntryMpvProperties() async {
+    try {
+      await _mpvBridge.setAudioDelay(0);
+      await _mpvBridge.setSubtitleDelay(0);
+    } catch (_) {
+      // Best-effort Reset bei fehlender nativer Engine
+    }
   }
 
   void dismissIntroSkip() {
@@ -90,20 +157,80 @@ class PlayerFeaturesDelegate {
     _onChanged();
   }
 
-  Future<void> resetForClose() async {
+  Future<void> resetSessionState({bool forceMpvReset = false}) async {
+    final hadDelays = audioDelayMs != 0 || subtitleDelayMs != 0;
+    final hadAspect = aspectMode != VideoAspectMode.original;
+    final hadNightMode = isNightMode;
+    final hadBoost = isVolumeBoostEnabled;
+
     audioDelayMs = 0;
     subtitleDelayMs = 0;
     aspectMode = VideoAspectMode.original;
-    await _mpvBridge.setAudioDelay(0);
-    await _mpvBridge.setSubtitleDelay(0);
-    await _mpvBridge.setAspectMode(VideoAspectMode.original);
+    isNightMode = false;
+    isVolumeBoostEnabled = false;
+    chapters = const [];
+    chaptersLoadedForEntry = false;
+    introSkipped = false;
+    seriesIntroSkipSeconds = 0;
+    bookmarks = const [];
+
+    try {
+      if (hadDelays || forceMpvReset) {
+        await _mpvBridge.setAudioDelay(0);
+        await _mpvBridge.setSubtitleDelay(0);
+      }
+      if (hadAspect || forceMpvReset) {
+        await _mpvBridge.setAspectMode(VideoAspectMode.original);
+      }
+      if (hadNightMode) {
+        await _mpvBridge.setAudioNightMode(false);
+      }
+      if (hadBoost) {
+        await _mpvBridge.setVolumeMax(AppSpacing.volumeMax);
+      }
+    } catch (_) {
+      // Best-effort Reset bei geschlossener oder gemockter Engine
+    }
   }
 
-  Future<void> loadChapters(bool Function() isDisposed) async {
-    final loaded = await _mpvBridge.readChapters();
-    if (isDisposed()) return;
-    chapters = loaded;
-    _onChanged();
+  Future<void> loadChapters(bool Function() isStale) async {
+    if (isStale()) return;
+    try {
+      final loaded = await _mpvBridge.readChapters();
+      if (isStale()) return;
+      chapters = loaded;
+      _onChanged();
+    } catch (_) {
+      if (isStale()) return;
+      chapters = const [];
+      _onChanged();
+    }
+  }
+
+  Future<void> loadExternalSubtitle(
+    String dialogTitle, {
+    required bool Function() isStale,
+    required void Function(SubtitleTrack track) onTrackSelected,
+  }) async {
+    try {
+      final path = await _windowAdapter.pickSubtitleFile(dialogTitle);
+      if (path == null || path.trim().isEmpty || isStale()) return;
+      final track = SubtitleTrack.uri(path);
+      await _player.setSubtitleTrack(track);
+      if (isStale()) return;
+      onTrackSelected(track);
+      _overlays.showActionOsd(
+        PlayerActionOsdKind.subtitle,
+        AppStrings.osdExternalSubLoaded,
+      );
+      _onChanged();
+    } catch (_) {
+      if (isStale()) return;
+      _overlays.showActionOsd(
+        PlayerActionOsdKind.error,
+        AppStrings.playerExternalSubFailedOsd,
+      );
+    }
   }
 
   Future<void> applySubtitleStyle({
@@ -171,9 +298,10 @@ class PlayerFeaturesDelegate {
   }
 
   Future<void> adjustAudioDelay(int deltaMs) async {
-    audioDelayMs =
-        (audioDelayMs + deltaMs).clamp(AppSpacing.delayMinMs, AppSpacing.delayMaxMs);
-    await _mpvBridge.setAudioDelay(audioDelayMs / AppSpacing.millisecondsPerSecond);
+    audioDelayMs = (audioDelayMs + deltaMs)
+        .clamp(AppSpacing.delayMinMs, AppSpacing.delayMaxMs);
+    await _mpvBridge
+        .setAudioDelay(audioDelayMs / AppSpacing.millisecondsPerSecond);
     _overlays.showActionOsd(
       PlayerActionOsdKind.audioDelay,
       '${AppStrings.playerAudioDelayLabel}: ${Formatters.formatDelayMs(audioDelayMs)}',
@@ -221,7 +349,8 @@ class PlayerFeaturesDelegate {
 
   Future<void> jumpToNextChapter(Duration position) async {
     for (final c in chapters) {
-      if (c.startMs > position.inMilliseconds + AppSpacing.millisecondsPerSecond) {
+      if (c.startMs >
+          position.inMilliseconds + AppSpacing.millisecondsPerSecond) {
         await _player.seek(Duration(milliseconds: c.startMs));
         _overlays.showActionOsd(PlayerActionOsdKind.chapter, c.title);
         return;
@@ -231,7 +360,8 @@ class PlayerFeaturesDelegate {
 
   Future<void> jumpToPreviousChapter(Duration position) async {
     PlayerChapter? target;
-    final cutoff = position.inMilliseconds - (2 * AppSpacing.millisecondsPerSecond);
+    final cutoff =
+        position.inMilliseconds - (2 * AppSpacing.millisecondsPerSecond);
     for (final c in chapters) {
       if (c.startMs < cutoff) target = c;
     }
@@ -267,7 +397,8 @@ class PlayerFeaturesDelegate {
   }
 
   void setSeriesIntroSkipSeconds(int? seriesId, int seconds) {
-    seriesIntroSkipSeconds = seconds.clamp(0, AppSpacing.introSkipWindowSeconds);
+    seriesIntroSkipSeconds =
+        seconds.clamp(0, AppSpacing.introSkipWindowSeconds);
     if (seriesId != null) {
       _persistence.saveSeriesIntroSkip(seriesId, seriesIntroSkipSeconds);
     }
@@ -276,7 +407,8 @@ class PlayerFeaturesDelegate {
 
   void addBookmark(PlaybackQueueEntry? entry, Duration position, String label) {
     if (entry == null) return;
-    _persistence.addBookmark(entry.mediaKey, position.inMilliseconds, label: label);
+    _persistence.addBookmark(entry.mediaKey, position.inMilliseconds,
+        label: label);
     bookmarks = _persistence.loadBookmarks(entry.mediaKey);
     _overlays.showActionOsd(
       PlayerActionOsdKind.bookmark,
@@ -299,14 +431,19 @@ class PlayerFeaturesDelegate {
     await _player.seek(Duration(milliseconds: bookmark.positionMs));
     _overlays.showActionOsd(
       PlayerActionOsdKind.bookmark,
-      Formatters.formatPlayerDuration(Duration(milliseconds: bookmark.positionMs)),
+      Formatters.formatPlayerDuration(
+          Duration(milliseconds: bookmark.positionMs)),
     );
   }
 
-  Future<String?> captureScreenshot(PlaybackQueueEntry? entry) async {
-    if (entry == null) return null;
+  Future<String?> captureScreenshot(
+    PlaybackQueueEntry? entry, {
+    required bool Function() isStale,
+  }) async {
+    if (entry == null || isStale()) return null;
     try {
       final bytes = await _player.screenshot(format: 'image/png');
+      if (isStale()) return null;
       if (bytes == null || bytes.isEmpty) {
         _overlays.showActionOsd(
           PlayerActionOsdKind.screenshot,
@@ -315,6 +452,7 @@ class PlayerFeaturesDelegate {
         return null;
       }
       final saved = await _onSaveScreenshot(bytes, entry.title);
+      if (isStale()) return saved;
       _overlays.showActionOsd(
         PlayerActionOsdKind.screenshot,
         saved != null
@@ -323,10 +461,12 @@ class PlayerFeaturesDelegate {
       );
       return saved;
     } catch (_) {
-      _overlays.showActionOsd(
-        PlayerActionOsdKind.screenshot,
-        AppStrings.playerScreenshotFailedOsd,
-      );
+      if (!isStale()) {
+        _overlays.showActionOsd(
+          PlayerActionOsdKind.screenshot,
+          AppStrings.playerScreenshotFailedOsd,
+        );
+      }
       return null;
     }
   }
@@ -337,7 +477,22 @@ class PlayerFeaturesDelegate {
     _onChanged();
   }
 
-  String formatRightTimeLabel(Duration pos, Duration dur, double speed, DateTime now) {
+  Future<void> stepFrame({
+    required bool forward,
+    required bool isPlaying,
+  }) async {
+    if (isPlaying) {
+      await _player.pause();
+    }
+    await _mpvBridge.sendCommand([forward ? 'frame-step' : 'frame-back-step']);
+    _overlays.showActionOsd(
+      PlayerActionOsdKind.frameStep,
+      forward ? AppStrings.osdFrameStepForward : AppStrings.osdFrameStepBack,
+    );
+  }
+
+  String formatRightTimeLabel(
+      Duration pos, Duration dur, double speed, DateTime now) {
     switch (timeDisplayMode) {
       case TimeDisplayMode.total:
         return Formatters.formatPlayerDuration(dur);

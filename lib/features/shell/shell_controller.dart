@@ -4,6 +4,8 @@ import '../../core/constants/app_spacing.dart';
 import '../../core/constants/app_strings.dart';
 import '../../core/controllers/library_controller.dart';
 import '../../core/controllers/settings_controller.dart';
+import '../../core/models/media_source_models.dart';
+import '../../core/models/status_feedback_models.dart';
 import '../../core/services/desktop_platform_service.dart';
 import '../../core/storage/database_service.dart';
 import '../home/home_controller.dart';
@@ -11,13 +13,11 @@ import '../library/library_models.dart';
 import '../player/playback_session.dart';
 import '../player/saphir_player_controller.dart';
 import '../stats/stats_controller.dart';
+import 'shell_shutdown_runner.dart';
+import 'shell_startup_coordinator.dart';
+import 'shell_window_delegate.dart';
 
-enum AppSection {
-  home,
-  library,
-  stats,
-  settings,
-}
+enum AppSection { home, library, stats, settings }
 
 class ShellController extends ChangeNotifier {
   ShellController({
@@ -30,6 +30,7 @@ class ShellController extends ChangeNotifier {
     Future<void> Function()? onHideWindow,
     Future<void> Function()? onDestroyWindow,
     VoidCallback? onForceExit,
+    ShutdownTimeouts shutdownTimeouts = const ShutdownTimeouts(),
   })  : _settingsController = settingsController,
         _libraryController = libraryController,
         _homeController = homeController,
@@ -39,7 +40,10 @@ class ShellController extends ChangeNotifier {
         _onHideWindow = onHideWindow ?? DesktopPlatformService.hideWindow,
         _onDestroyWindow =
             onDestroyWindow ?? DesktopPlatformService.destroyWindow,
-        _onForceExit = onForceExit ?? DesktopPlatformService.forceExitProcess;
+        _onForceExit = onForceExit ?? DesktopPlatformService.forceExitProcess,
+        _shutdownTimeouts = shutdownTimeouts {
+    _window = ShellWindowDelegate(onChanged: _safeNotify);
+  }
 
   SettingsController? _settingsController;
   LibraryController? _libraryController;
@@ -50,27 +54,36 @@ class ShellController extends ChangeNotifier {
   final Future<void> Function() _onHideWindow;
   final Future<void> Function() _onDestroyWindow;
   final VoidCallback _onForceExit;
+  final ShutdownTimeouts _shutdownTimeouts;
+  final ShellStartupCoordinator _startup = ShellStartupCoordinator();
+  late final ShellWindowDelegate _window;
 
   AppSection _activeSection = AppSection.home;
-  bool _isMaximized = false;
   SeriesDetailData? _selectedSeriesDetail;
   PlaybackSession? _activePlaybackSession;
-  String? _statusMessage;
+  StatusBannerMessage? _statusBanner;
   Timer? _searchDebounceTimer;
   Timer? _statusClearTimer;
-  Object? _windowListenerToken;
   bool _isClosing = false;
+  ShutdownPhase _shutdownPhase = ShutdownPhase.idle;
+  ShutdownReport? _lastShutdownReport;
+  Future<ShutdownReport>? _shutdownFuture;
   bool _isMaintenanceInProgress = false;
   bool _isDisposed = false;
 
   AppSection get activeSection => _activeSection;
-  bool get isMaximized => _isMaximized;
+  bool get isMaximized => _window.isMaximized;
   SeriesDetailData? get selectedSeriesDetail => _selectedSeriesDetail;
   PlaybackSession? get activePlaybackSession => _activePlaybackSession;
   bool get isPlayerOpen => _activePlaybackSession != null;
   bool get isClosing => _isClosing;
+  ShutdownPhase get shutdownPhase => _shutdownPhase;
+  ShutdownReport? get lastShutdownReport => _lastShutdownReport;
   bool get isMaintenanceInProgress => _isMaintenanceInProgress;
-  String? get statusMessage => _statusMessage;
+  StatusBannerMessage? get statusBanner => _statusBanner;
+  String? get statusMessage => _statusBanner?.message;
+  StatusBannerMessage? get startupBanner => _startup.startupBanner;
+  bool get canRetryStartupSync => _startup.canRetryStartupSync;
 
   void attachDependencies({
     SettingsController? settingsController,
@@ -88,121 +101,67 @@ class ShellController extends ChangeNotifier {
     _databaseService ??= databaseService;
   }
 
-  void attachWindowListener() {
-    if (_windowListenerToken != null) return;
-    _windowListenerToken = DesktopPlatformService.registerWindowCallbacks(
-      onMaximize: onWindowMaximize,
-      onUnmaximize: onWindowUnmaximize,
-      onClose: onWindowClose,
-    );
-  }
+  void initializeStartupState() => _startup.initializeFromSettings(
+        _settingsController,
+        onChanged: _safeNotify,
+      );
 
-  void detachWindowListener() {
-    if (_windowListenerToken == null) return;
-    DesktopPlatformService.unregisterWindowCallbacks(_windowListenerToken);
-    _windowListenerToken = null;
-  }
+  Future<void> runStartupSync({
+    Future<void> Function()? onPostSyncThumbnailBatch,
+  }) =>
+      _startup.runStartupSync(
+        settingsController: _settingsController,
+        libraryController: _libraryController,
+        databaseService: _databaseService,
+        isClosingOrDisposed: () => _isClosing || _isDisposed,
+        isPlayerOpen: () => isPlayerOpen,
+        onRefreshViews: _refreshAllViews,
+        onChanged: _safeNotify,
+        onPostSyncThumbnailBatch: onPostSyncThumbnailBatch,
+      );
 
-  void onWindowMaximize() => _setMaximized(true);
+  Future<void> retryStartupSync() => runStartupSync();
+  void dismissStartupBanner() => _startup.dismissBanner(onChanged: _safeNotify);
+  void attachWindowListener() =>
+      _window.attachWindowListener(onClose: onWindowClose);
+  void detachWindowListener() => _window.detachWindowListener();
+  void onWindowMaximize() => _window.onWindowMaximize();
+  void onWindowUnmaximize() => _window.onWindowUnmaximize();
+  Future<void> startWindowDragging() => _window.startWindowDragging();
+  Future<void> syncMaximizedState() => _window.syncMaximizedState();
+  Future<void> minimizeWindow() => _window.minimizeWindow();
+  Future<void> toggleMaximizeWindow() => _window.toggleMaximizeWindow();
+  Future<void> closeWindow() => _window.closeWindow();
 
-  void onWindowUnmaximize() => _setMaximized(false);
+  Future<void> onWindowClose() {
+    final existing = _shutdownFuture;
+    if (existing != null) return existing;
 
-  void _setMaximized(bool value) {
-    if (_isMaximized == value) return;
-    _isMaximized = value;
-    _safeNotify();
-  }
-
-  Future<void> onWindowClose() async {
-    if (_isClosing) return;
     _isClosing = true;
     cancelPendingTimers();
-
-    try {
-      await _onHideWindow();
-    } catch (_) {}
-
-    var playerDisposeTimedOut = false;
-    var scanStopTimedOut = false;
-    var shouldDrainNativeVideo = false;
-
-    try {
-      if (isPlayerOpen) {
-        _libraryController?.setPlaybackActive(false, resumePausedScan: false);
-        closePlaybackSession();
-      }
-
-      final shutdownTasks = <Future<void>>[];
-      if (_playerController != null) {
-        shutdownTasks.add(
-          _runWithTimeout(
-            _playerController!.disposeForShutdown(),
-            const Duration(
-              milliseconds: AppSpacing.shutdownPlayerDisposeTimeoutMs,
-            ),
-          ).then((disposed) {
-            shouldDrainNativeVideo = disposed;
-            playerDisposeTimedOut = !disposed;
-          }),
-        );
-      }
-
-      if (_libraryController != null) {
-        shutdownTasks.add(
-          _runWithTimeout(
-            _libraryController!.cancelScanForShutdown(),
-            const Duration(
-              milliseconds: AppSpacing.shutdownScanStopTimeoutMs,
-            ),
-          ).then((stopped) {
-            scanStopTimedOut = !stopped;
-          }),
-        );
-      }
-
-      if (shutdownTasks.isNotEmpty) {
-        await Future.wait(shutdownTasks);
-      }
-
-      if (shouldDrainNativeVideo) {
-        await Future<void>.delayed(
-          const Duration(milliseconds: AppSpacing.shutdownNativeDrainDelayMs),
-        );
-      }
-
-      if (_settingsController != null) {
-        await _runWithTimeout(
-          _settingsController!.syncProgress(),
-          const Duration(milliseconds: AppSpacing.shutdownSyncTimeoutMs),
-        );
-      }
-
-      if (!scanStopTimedOut) {
-        _databaseService?.close();
-      }
-    } finally {
-      if (playerDisposeTimedOut || scanStopTimedOut) {
-        _onForceExit();
-      } else {
-        await _onDestroyWindow();
-      }
-    }
-  }
-
-  Future<bool> _runWithTimeout(Future<void> future, Duration timeout) async {
-    try {
-      await future.timeout(timeout);
-      return true;
-    } catch (_) {
-      return false;
-    }
+    final future = ShellShutdownRunner.execute(
+      isPlayerOpen: isPlayerOpen,
+      onClosePlaybackSession: closePlaybackSession,
+      settingsController: _settingsController,
+      libraryController: _libraryController,
+      playerController: _playerController,
+      databaseService: _databaseService,
+      onHideWindow: _onHideWindow,
+      onDestroyWindow: _onDestroyWindow,
+      onForceExit: _onForceExit,
+      onPhaseChanged: (phase) => _shutdownPhase = phase,
+      timeouts: _shutdownTimeouts,
+    ).then((report) {
+      _lastShutdownReport = report;
+      return report;
+    });
+    _shutdownFuture = future;
+    return future;
   }
 
   void selectSection(AppSection section) {
     _selectedSeriesDetail = null;
-    if (section == AppSection.stats) {
-      _statsController?.refreshStats();
-    }
+    if (section == AppSection.stats) _statsController?.refreshStats();
     if (_activeSection == section) {
       _safeNotify();
       return;
@@ -225,15 +184,20 @@ class ShellController extends ChangeNotifier {
     _safeNotify();
   }
 
-  void _setStatusMessage(String message) {
+  void _setStatusMessage(
+    String message, {
+    StatusSeverity severity = StatusSeverity.success,
+    String? detail,
+  }) {
     _statusClearTimer?.cancel();
-    _statusMessage = message;
+    _statusBanner = StatusBannerMessage(
+        message: message, severity: severity, detail: detail);
     _safeNotify();
     _statusClearTimer = Timer(
       const Duration(seconds: AppSpacing.statusBannerAutoHideSeconds),
       () {
         if (_isDisposed) return;
-        _statusMessage = null;
+        _statusBanner = null;
         _safeNotify();
       },
     );
@@ -280,7 +244,8 @@ class ShellController extends ChangeNotifier {
 
   Future<T?> _runMaintenance<T>(Future<T> Function() action) async {
     if (_isBusyOrClosing) {
-      _setStatusMessage(AppStrings.maintenanceBusyStatus);
+      _setStatusMessage(AppStrings.maintenanceBusyStatus,
+          severity: StatusSeverity.warning);
       return null;
     }
     _isMaintenanceInProgress = true;
@@ -307,11 +272,23 @@ class ShellController extends ChangeNotifier {
     _statsController?.refreshStats();
   }
 
-  Future<void> handleSyncNow() async {
+  Future<void> handleRescanSource(String rootPath) async {
     if (_isBusyOrClosing) return;
-    await _settingsController?.syncProgress();
+    await _libraryController?.refreshSingleSource(rootPath);
+    _homeController?.refreshHomeFeeds();
+    _statsController?.refreshStats();
+  }
+
+  Future<void> handleSyncNow() async {
+    if (_isBusyOrClosing || _settingsController == null) return;
+    await _settingsController!.syncProgress();
     _refreshAllViews();
-    _setStatusMessage(AppStrings.syncCompletedStatus);
+    final feedback = _settingsController!.lastSyncFeedback;
+    _setStatusMessage(
+      feedback?.headline ?? AppStrings.syncFailedStatus,
+      severity: feedback?.severity ?? StatusSeverity.error,
+      detail: feedback?.detail,
+    );
   }
 
   Future<void> handleClearCache() => _runMaintenance(() async {
@@ -320,17 +297,20 @@ class ShellController extends ChangeNotifier {
         );
         _libraryController?.refreshThumbnailQueueStats();
         _refreshAllViews();
+        final hasWarn = result != null && result.hasWarnings;
         _setStatusMessage(
-          (result != null && result.hasWarnings)
+          hasWarn
               ? AppStrings.cacheClearedWithWarningsStatus
               : AppStrings.cacheClearedStatus,
+          severity: hasWarn ? StatusSeverity.warning : StatusSeverity.success,
         );
       });
 
   Future<void> handleRetryFailedThumbnails() async {
     if (_isBusyOrClosing) return;
     await _libraryController?.retryFailedThumbnails();
-    _setStatusMessage(AppStrings.retryThumbnailsStatus);
+    _setStatusMessage(AppStrings.retryThumbnailsStatus,
+        severity: StatusSeverity.info);
   }
 
   Future<void> handleCreateBackup() => _runMaintenance(() async {
@@ -340,90 +320,120 @@ class ShellController extends ChangeNotifier {
           result.success
               ? AppStrings.backupCreatedStatus
               : AppStrings.backupFailedStatus,
+          severity:
+              result.success ? StatusSeverity.success : StatusSeverity.error,
         );
       });
 
-  Future<void> handleRestoreBackup({String? backupPath}) async {
-    await _runMaintenance(() async {
-      final target = backupPath ?? _settingsController?.latestBackup?.filePath;
-      if (target == null || _settingsController == null) {
-        _setStatusMessage(AppStrings.backupRestoreFailedStatus);
-        return;
-      }
-      final result = await _settingsController!.restoreBackupFromPath(target);
-      if (result.success) {
-        _selectedSeriesDetail = null;
-        _refreshAllViews();
-      }
-      _setStatusMessage(
-        result.success
-            ? AppStrings.backupRestoredStatus
-            : AppStrings.backupRestoreFailedStatus,
-      );
-    });
-  }
+  Future<void> handleRestoreBackup({String? backupPath}) =>
+      _runMaintenance(() async {
+        final target =
+            backupPath ?? _settingsController?.latestBackup?.filePath;
+        if (target == null || _settingsController == null) {
+          _setStatusMessage(AppStrings.backupRestoreFailedStatus,
+              severity: StatusSeverity.error);
+          return;
+        }
+        final result = await _settingsController!.restoreBackupFromPath(target);
+        if (result.success) {
+          _selectedSeriesDetail = null;
+          _refreshAllViews();
+        }
+        _setStatusMessage(
+          result.success
+              ? AppStrings.backupRestoredStatus
+              : AppStrings.backupRestoreFailedStatus,
+          severity:
+              result.success ? StatusSeverity.success : StatusSeverity.error,
+        );
+      });
 
   Future<void> handleAddFolderFromPicker() async {
-    final added = await _settingsController?.pickAndAddFolder(
-      AppStrings.pickFolderDialogTitle,
-    );
-    if (added == null || _isDisposed) {
-      return;
-    }
+    final added = await _settingsController
+        ?.pickAndAddFolder(AppStrings.pickFolderDialogTitle);
+    if (added == null || _isDisposed) return;
     _setStatusMessage(
       added ? AppStrings.folderAddedStatus : AppStrings.folderDuplicateStatus,
+      severity: added ? StatusSeverity.success : StatusSeverity.info,
     );
   }
 
   bool handleAddFolderFromInput(String rawPath) {
     final candidate = rawPath.trim();
-    if (candidate.isEmpty || _settingsController == null) {
-      return false;
-    }
+    if (candidate.isEmpty || _settingsController == null) return false;
     final added = _settingsController!.addNasPath(candidate);
     _setStatusMessage(
       added ? AppStrings.folderAddedStatus : AppStrings.folderDuplicateStatus,
+      severity: added ? StatusSeverity.success : StatusSeverity.info,
     );
     return added;
   }
 
   void handleRemoveFolder(String path) {
     _settingsController?.removeNasPath(path);
-    _setStatusMessage(AppStrings.folderRemovedStatus);
+    _selectedSeriesDetail = null;
+    _refreshAllViews();
+    _setStatusMessage(AppStrings.folderRemovedStatus,
+        severity: StatusSeverity.info);
   }
 
-  Future<void> handleResetDatabase() async {
-    await _runMaintenance(() async {
-      final backupResult = await _settingsController?.resetDatabaseWithBackup(
-        requireBackup: true,
-      );
-      if (backupResult != null && !backupResult.success) {
-        _setStatusMessage(AppStrings.backupFailedStatus);
-        return;
-      }
+  Future<void> handleRemoveMediaSource(
+      String sourceId, SourceRemovalAction action) async {
+    if (_settingsController == null) return;
+    if (action == SourceRemovalAction.disableKeepData) {
+      await _settingsController!.removeMediaSource(sourceId, action: action);
       _selectedSeriesDetail = null;
-      _libraryController?.resetLibraryState();
-      _homeController?.updateSearchQuery('');
-      _homeController?.refreshHomeFeeds();
-      _statsController?.refreshStats();
-      _setStatusMessage(AppStrings.databaseResetStatus);
+      _refreshAllViews();
+      _setStatusMessage(AppStrings.sourceDisabledStatus,
+          severity: StatusSeverity.info);
+      return;
+    }
+    await _runMaintenance(() async {
+      await _settingsController!.removeMediaSource(sourceId, action: action);
+      _selectedSeriesDetail = null;
+      _refreshAllViews();
+      _setStatusMessage(AppStrings.sourceRemovedWithIndexStatus,
+          severity: StatusSeverity.info);
     });
   }
 
+  void handleReactivateMediaSource(String sourceId) {
+    if (_settingsController == null ||
+        !_settingsController!.reactivateMediaSource(sourceId)) {
+      return;
+    }
+    _refreshAllViews();
+    _setStatusMessage(AppStrings.sourceReactivatedStatus,
+        severity: StatusSeverity.success);
+  }
+
+  Future<void> handleResetDatabase() => _runMaintenance(() async {
+        final backupResult = await _settingsController?.resetDatabaseWithBackup(
+            requireBackup: true);
+        if (backupResult != null && !backupResult.success) {
+          _setStatusMessage(AppStrings.backupFailedStatus,
+              severity: StatusSeverity.error);
+          return;
+        }
+        _selectedSeriesDetail = null;
+        _libraryController?.resetLibraryState();
+        _homeController?.updateSearchQuery('');
+        _homeController?.refreshHomeFeeds();
+        _statsController?.refreshStats();
+        _setStatusMessage(AppStrings.databaseResetStatus,
+            severity: StatusSeverity.info);
+      });
+
   void handleSaveSettings(String pendingInput) {
     final trimmed = pendingInput.trim();
-    if (trimmed.isNotEmpty) {
-      _settingsController?.addNasPath(trimmed);
-    }
+    if (trimmed.isNotEmpty) _settingsController?.addNasPath(trimmed);
     _settingsController?.save();
     _setStatusMessage(AppStrings.savedStatus);
   }
 
   void openSeriesById(int seriesId) {
     final detail = _homeController?.loadSeriesDetail(seriesId);
-    if (detail != null) {
-      openSeriesDetail(detail);
-    }
+    if (detail != null) openSeriesDetail(detail);
   }
 
   Future<void> launchPlayer(PlaybackSession session) async {
@@ -458,24 +468,6 @@ class ShellController extends ChangeNotifier {
       unawaited(_settingsController!.syncProgress());
     }
   }
-
-  Future<void> startWindowDragging() =>
-      DesktopPlatformService.startWindowDragging();
-
-  Future<void> syncMaximizedState() async =>
-      _setMaximized(await DesktopPlatformService.isWindowMaximized());
-
-  Future<void> minimizeWindow() => DesktopPlatformService.minimizeWindow();
-
-  Future<void> toggleMaximizeWindow() async {
-    final nextMaximized = !(await DesktopPlatformService.isWindowMaximized());
-    await (nextMaximized
-        ? DesktopPlatformService.maximizeWindow()
-        : DesktopPlatformService.unmaximizeWindow());
-    _setMaximized(nextMaximized);
-  }
-
-  Future<void> closeWindow() => DesktopPlatformService.closeWindow();
 
   void _safeNotify() {
     if (!_isDisposed) notifyListeners();

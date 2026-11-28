@@ -198,6 +198,9 @@ class AppSpacing {
   static const int shutdownPlayerDisposeTimeoutMs = 2000;
   static const int shutdownScanStopTimeoutMs = 1500;
   static const int shutdownSyncTimeoutMs = 2500;
+  static const int shutdownSyncCancelGraceMs = 300;
+  static const int shutdownProcessGraceMs = 150;
+  static const int shutdownProcessKillTimeoutMs = 250;
   static const int shutdownNativeDrainDelayMs = 250;
   static const int shutdownWindowDestroyTimeoutMs = 1000;
 
@@ -208,4 +211,7 @@ class AppSpacing {
   static const int thumbnailMaxRetryAttempts = 3;
   static const int thumbnailRetryBaseSeconds = 30;
   static const int thumbnailQueueBatchDelayMs = 250;
+
+  static const double sourceStatusDotSize = 10.0;
+  static const int compactPathMaxLength = 42;
 }

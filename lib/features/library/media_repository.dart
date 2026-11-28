@@ -12,8 +12,22 @@ class MediaRepository {
 
   ({int seriesCount, int movieCount}) loadCounts() {
     final db = _databaseService.instance;
-    final seriesRow = db.select('SELECT COUNT(*) AS cnt FROM series;').first;
-    final moviesRow = db.select('SELECT COUNT(*) AS cnt FROM movies;').first;
+    final seriesRow = db.select(
+      '''
+      SELECT COUNT(*) AS cnt
+      FROM series s
+      LEFT JOIN media_sources ms ON ms.source_id = s.source_id
+      WHERE (ms.status IS NULL OR ms.status = 'active');
+      ''',
+    ).first;
+    final moviesRow = db.select(
+      '''
+      SELECT COUNT(*) AS cnt
+      FROM movies m
+      LEFT JOIN media_sources ms ON ms.source_id = m.source_id
+      WHERE (ms.status IS NULL OR ms.status = 'active');
+      ''',
+    ).first;
     return (
       seriesCount: seriesRow['cnt'] as int,
       movieCount: moviesRow['cnt'] as int,
@@ -45,7 +59,9 @@ class MediaRepository {
         ON wp.media_key = COALESCE(NULLIF(e.sync_key, ''), 'episode_' || e.id)
       INNER JOIN series s ON e.series_id = s.id
       INNER JOIN seasons sn ON e.season_id = sn.id
+      LEFT JOIN media_sources ms ON ms.source_id = e.source_id
       WHERE wp.completed = 0 AND wp.position_ms > 0
+        AND (ms.status IS NULL OR ms.status = 'active')
       ORDER BY wp.updated_at DESC;
       ''',
     );
@@ -100,7 +116,9 @@ class MediaRepository {
       FROM watch_progress wp
       INNER JOIN movies m
         ON wp.media_key = COALESCE(NULLIF(m.sync_key, ''), 'movie_' || m.id)
+      LEFT JOIN media_sources ms ON ms.source_id = m.source_id
       WHERE wp.completed = 0 AND wp.position_ms > 0
+        AND (ms.status IS NULL OR ms.status = 'active')
       ORDER BY wp.updated_at DESC;
       ''',
     );
@@ -153,6 +171,8 @@ class MediaRepository {
         (SELECT e.thumb_path FROM episodes e WHERE e.series_id = s.id AND e.thumb_path IS NOT NULL ORDER BY e.id ASC LIMIT 1) AS fallback_thumb,
         (SELECT e.artist FROM episodes e WHERE e.series_id = s.id AND e.artist IS NOT NULL AND e.artist != '' ORDER BY e.id ASC LIMIT 1) AS first_artist
       FROM series s
+      LEFT JOIN media_sources ms ON ms.source_id = s.source_id
+      WHERE (ms.status IS NULL OR ms.status = 'active')
       ORDER BY s.id DESC
       LIMIT ?;
       ''',
@@ -198,6 +218,8 @@ class MediaRepository {
       FROM movies m
       LEFT JOIN watch_progress wp
         ON wp.media_key = COALESCE(NULLIF(m.sync_key, ''), 'movie_' || m.id)
+      LEFT JOIN media_sources ms ON ms.source_id = m.source_id
+      WHERE (ms.status IS NULL OR ms.status = 'active')
       ORDER BY m.id DESC
       LIMIT ?;
       ''',
@@ -223,7 +245,9 @@ class MediaRepository {
         (SELECT e.thumb_path FROM episodes e WHERE e.series_id = s.id AND e.thumb_path IS NOT NULL ORDER BY e.id ASC LIMIT 1) AS fallback_thumb,
         (SELECT e.artist FROM episodes e WHERE e.series_id = s.id AND e.artist IS NOT NULL AND e.artist != '' ORDER BY e.id ASC LIMIT 1) AS first_artist
       FROM series s
-      WHERE s.last_watched_at IS NULL OR s.last_watched_at < ?
+      LEFT JOIN media_sources ms ON ms.source_id = s.source_id
+      WHERE (ms.status IS NULL OR ms.status = 'active')
+        AND (s.last_watched_at IS NULL OR s.last_watched_at < ?)
       ORDER BY s.id DESC
       LIMIT ?;
       ''',
@@ -269,7 +293,9 @@ class MediaRepository {
       FROM movies m
       LEFT JOIN watch_progress wp
         ON wp.media_key = COALESCE(NULLIF(m.sync_key, ''), 'movie_' || m.id)
-      WHERE m.last_watched_at IS NULL OR m.last_watched_at < ?
+      LEFT JOIN media_sources ms ON ms.source_id = m.source_id
+      WHERE (ms.status IS NULL OR ms.status = 'active')
+        AND (m.last_watched_at IS NULL OR m.last_watched_at < ?)
       ORDER BY m.id DESC
       LIMIT ?;
       ''',
@@ -297,6 +323,8 @@ class MediaRepository {
         (SELECT e.thumb_path FROM episodes e WHERE e.series_id = s.id AND e.thumb_path IS NOT NULL ORDER BY e.id ASC LIMIT 1) AS fallback_thumb,
         (SELECT e.artist FROM episodes e WHERE e.series_id = s.id AND e.artist IS NOT NULL AND e.artist != '' ORDER BY e.id ASC LIMIT 1) AS first_artist
       FROM series s
+      LEFT JOIN media_sources ms ON ms.source_id = s.source_id
+      WHERE (ms.status IS NULL OR ms.status = 'active')
       ORDER BY s.title COLLATE NOCASE ASC;
       ''',
     );
@@ -347,6 +375,8 @@ class MediaRepository {
       FROM movies m
       LEFT JOIN watch_progress wp
         ON wp.media_key = COALESCE(NULLIF(m.sync_key, ''), 'movie_' || m.id)
+      LEFT JOIN media_sources ms ON ms.source_id = m.source_id
+      WHERE (ms.status IS NULL OR ms.status = 'active')
       ORDER BY m.title COLLATE NOCASE ASC;
       ''',
     );
@@ -357,7 +387,13 @@ class MediaRepository {
   SeriesDetailData? loadSeriesDetail(int seriesId) {
     final db = _databaseService.instance;
     final seriesRows = db.select(
-      'SELECT id, title, folder_path, poster_path, summary FROM series WHERE id = ? LIMIT 1;',
+      '''
+      SELECT s.id, s.title, s.folder_path, s.poster_path, s.summary
+      FROM series s
+      LEFT JOIN media_sources ms ON ms.source_id = s.source_id
+      WHERE s.id = ? AND (ms.status IS NULL OR ms.status = 'active')
+      LIMIT 1;
+      ''',
       [seriesId],
     );
     if (seriesRows.isEmpty) {
@@ -384,9 +420,11 @@ class MediaRepository {
         COALESCE(wp.completed, 0) AS completed
       FROM seasons sn
       INNER JOIN episodes e ON e.season_id = sn.id
+      LEFT JOIN media_sources ms ON ms.source_id = e.source_id
       LEFT JOIN watch_progress wp
         ON wp.media_key = COALESCE(NULLIF(e.sync_key, ''), 'episode_' || e.id)
       WHERE sn.series_id = ?
+        AND (ms.status IS NULL OR ms.status = 'active')
       ORDER BY sn.season_number ASC, e.episode_number ASC;
       ''',
       [seriesId],

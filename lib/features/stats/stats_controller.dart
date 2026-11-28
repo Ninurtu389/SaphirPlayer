@@ -141,28 +141,42 @@ class StatsController extends ChangeNotifier {
         )
         .toList();
 
-    final totalEpRow = db.select('SELECT COUNT(*) AS cnt FROM episodes;').first;
-    final completedEpRow = db
-        .select(
-          '''
+    final totalEpRow = db.select(
+      '''
+      SELECT COUNT(*) AS cnt
+      FROM episodes e
+      LEFT JOIN media_sources ms ON ms.source_id = e.source_id
+      WHERE (ms.status IS NULL OR ms.status = 'active');
+      ''',
+    ).first;
+    final completedEpRow = db.select(
+      '''
           SELECT COUNT(*) AS cnt
           FROM watch_progress wp
           INNER JOIN episodes e ON wp.media_key = COALESCE(e.sync_key, 'episode_' || e.id)
-          WHERE wp.media_type = 'episode' AND wp.completed = 1;
+          LEFT JOIN media_sources ms ON ms.source_id = e.source_id
+          WHERE wp.media_type = 'episode' AND wp.completed = 1
+            AND (ms.status IS NULL OR ms.status = 'active');
           ''',
-        )
-        .first;
-    final totalMovieRow = db.select('SELECT COUNT(*) AS cnt FROM movies;').first;
-    final completedMovieRow = db
-        .select(
-          '''
+    ).first;
+    final totalMovieRow = db.select(
+      '''
+      SELECT COUNT(*) AS cnt
+      FROM movies m
+      LEFT JOIN media_sources ms ON ms.source_id = m.source_id
+      WHERE (ms.status IS NULL OR ms.status = 'active');
+      ''',
+    ).first;
+    final completedMovieRow = db.select(
+      '''
           SELECT COUNT(*) AS cnt
           FROM watch_progress wp
           INNER JOIN movies m ON wp.media_key = COALESCE(m.sync_key, 'movie_' || m.id)
-          WHERE wp.media_type = 'movie' AND wp.completed = 1;
+          LEFT JOIN media_sources ms ON ms.source_id = m.source_id
+          WHERE wp.media_type = 'movie' AND wp.completed = 1
+            AND (ms.status IS NULL OR ms.status = 'active');
           ''',
-        )
-        .first;
+    ).first;
 
     _summary = StatsSummary(
       totalWatchMs: totalWatchMs,

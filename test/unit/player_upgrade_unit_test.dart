@@ -4,11 +4,13 @@ import 'package:saphir_player/core/constants/app_strings.dart';
 import 'package:saphir_player/core/utils/formatters.dart';
 import 'package:saphir_player/features/library/library_models.dart';
 import 'package:saphir_player/features/player/mpv_property_bridge.dart';
+import 'package:saphir_player/features/player/track_preference_models.dart';
 import 'package:saphir_player/features/player/track_preference_resolver.dart';
 
 void main() {
   group('Formatters remaining, finish time, playbackSpeed & UI helpers', () {
-    test('formatPlaybackSpeed formats all speeds accurately without rounding', () {
+    test('formatPlaybackSpeed formats all speeds accurately without rounding',
+        () {
       expect(Formatters.formatPlaybackSpeed(0.75), '0.75×');
       expect(Formatters.formatPlaybackSpeed(1.0), '1.0×');
       expect(Formatters.formatPlaybackSpeed(1.25), '1.25×');
@@ -16,7 +18,8 @@ void main() {
       expect(Formatters.formatPlaybackSpeed(2.0), '2.0×');
     });
 
-    test('UI string formatters format remaining, episode row, series progress and hero line',
+    test(
+        'UI string formatters format remaining, episode row, series progress and hero line',
         () {
       expect(
         Formatters.formatRemainingMinutes(12),
@@ -120,7 +123,8 @@ void main() {
   });
 
   group('MpvPropertyBridge JSON & style helpers', () {
-    test('parseChaptersJson handles valid, empty, malformed, and fallback titles',
+    test(
+        'parseChaptersJson handles valid, empty, malformed, and fallback titles',
         () {
       expect(MpvPropertyBridge.parseChaptersJson(null), isEmpty);
       expect(MpvPropertyBridge.parseChaptersJson(''), isEmpty);
@@ -171,11 +175,18 @@ void main() {
         isTrue,
       );
       expect(
-        TrackPreferenceResolver.matchesSubtitleLanguage(SubtitleTrack.no(), 'de'),
+        TrackPreferenceResolver.matchesSubtitleLanguage(
+            SubtitleTrack.no(), 'de'),
         isFalse,
       );
 
-      final tracks = [SubtitleTrack.auto(), SubtitleTrack.no(), subFr, subEn, subDe];
+      final tracks = [
+        SubtitleTrack.auto(),
+        SubtitleTrack.no(),
+        subFr,
+        subEn,
+        subDe
+      ];
       expect(
         TrackPreferenceResolver.findPreferredSubtitleTrack(tracks, 'de')?.id,
         '1',
@@ -193,6 +204,77 @@ void main() {
         TrackPreferenceResolver.findPreferredSubtitleTrack(tracks, 'ja')?.id,
         '4',
       );
+    });
+
+    test(
+        'resolves swapped track IDs by stable language, title, codec and channels',
+        () {
+      const ep1Audio = AudioTrack(
+        '2',
+        'Deutsch',
+        'deu',
+        codec: 'eac3',
+        channelscount: 6,
+      );
+      final descriptor = TrackPreferenceDescriptor.fromAudioTrack(ep1Audio);
+
+      // Episode 2 has different numeric track IDs and 'ger' instead of 'deu'
+      const ep2En =
+          AudioTrack('1', 'English', 'eng', codec: 'eac3', channelscount: 6);
+      const ep2DeCommentary = AudioTrack(
+        '4',
+        'Deutsch Kommentar',
+        'ger',
+        codec: 'aac',
+        channelscount: 2,
+      );
+      const ep2DeMain = AudioTrack(
+        '7',
+        'Deutsch',
+        'ger',
+        codec: 'eac3',
+        channelscount: 6,
+      );
+
+      final resolved = TrackPreferenceResolver.resolve(
+        seriesPreferences: SeriesTrackPreferences(audio: descriptor),
+        audioTracks: [AudioTrack.auto(), ep2En, ep2DeCommentary, ep2DeMain],
+        subtitleTracks: [SubtitleTrack.auto(), SubtitleTrack.no()],
+        activeAudioTrack: AudioTrack.auto(),
+        activeSubtitleTrack: SubtitleTrack.auto(),
+        subtitlesEnabledByDefault: false,
+        preferredSubtitleLanguage: 'de',
+      );
+      expect(resolved.audio?.id, '7');
+      expect(resolved.subtitle?.id, 'no');
+    });
+
+    test(
+        'falls back to global subtitle preference when series language is absent',
+        () {
+      final resolved = TrackPreferenceResolver.resolve(
+        seriesPreferences: const SeriesTrackPreferences(
+          subtitle: TrackPreferenceDescriptor(
+            mode: TrackPreferenceMode.specific,
+            language: 'ja',
+            title: 'Japanese',
+            trackIdHint: '9',
+          ),
+        ),
+        audioTracks: [AudioTrack.auto()],
+        subtitleTracks: [
+          SubtitleTrack.auto(),
+          SubtitleTrack.no(),
+          const SubtitleTrack('1', 'Deutsch', 'deu'),
+          const SubtitleTrack('2', 'English', 'eng'),
+        ],
+        activeAudioTrack: AudioTrack.auto(),
+        activeSubtitleTrack: SubtitleTrack.auto(),
+        subtitlesEnabledByDefault: true,
+        preferredSubtitleLanguage: 'en',
+      );
+      expect(resolved.subtitle?.id, '2');
+      expect(resolved.fromSeries, isFalse);
     });
   });
 }

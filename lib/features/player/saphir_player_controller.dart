@@ -2,26 +2,25 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
-import '../../core/constants/app_spacing.dart';
 import '../../core/constants/app_strings.dart';
 import '../../core/controllers/settings_controller.dart';
-import '../../core/services/local_file_service.dart';
 import '../../core/storage/database_service.dart';
 import '../../core/storage/progress_sync_service.dart';
-import '../../core/utils/formatters.dart';
 import 'mpv_property_bridge.dart';
 import 'playback_persistence_service.dart';
 import 'playback_session.dart';
 import 'player_features_delegate.dart';
 import 'player_models.dart';
 import 'player_overlays_controller.dart';
-import 'track_preference_resolver.dart';
+import 'player_stream_coordinator.dart';
+import 'player_tracks_delegate.dart';
+import 'player_transport_delegate.dart';
 
 class SaphirPlayerController extends ChangeNotifier {
   SaphirPlayerController(
     DatabaseService databaseService,
-    this._syncService,
-    this._getNasPaths, {
+    ProgressSyncService syncService,
+    List<String> Function() getNasPaths, {
     SettingsController? settingsController,
     Player? player,
     VideoController? videoController,
@@ -29,94 +28,78 @@ class SaphirPlayerController extends ChangeNotifier {
     PlayerWindowAdapter? windowAdapter,
     Future<void> Function(bool fullscreen)? onSetFullScreen,
     Future<String?> Function(Uint8List bytes, String title)? onSaveScreenshot,
-  })  : _persistence = PlaybackPersistenceService(databaseService),
-        _settingsController = settingsController,
-        _windowAdapter = windowAdapter ?? PlayerWindowAdapter(setFullScreen: onSetFullScreen) {
-    _player = player ?? Player(configuration: const PlayerConfiguration(title: AppStrings.appTitle));
-    _videoController = videoController ??
-        VideoController(
-          _player,
-          configuration: VideoControllerConfiguration(
-            enableHardwareAcceleration: settingsController?.hardwareAccelerationEnabled ?? true,
-          ),
-        );
-    _mpvBridge = mpvBridge ?? MpvPropertyBridge(_player);
-    _overlays = PlayerOverlaysController(mpvBridge: _mpvBridge, onChanged: _safeNotify);
-    _features = PlayerFeaturesDelegate(
-      player: _player,
-      mpvBridge: _mpvBridge,
-      persistence: _persistence,
-      windowAdapter: _windowAdapter,
-      overlays: _overlays,
-      settingsController: _settingsController,
-      onSaveScreenshot: onSaveScreenshot ?? (bytes, title) => LocalFileService.saveScreenshotBytes(bytes: bytes, title: title),
+  }) {
+    final d = PlayerControllerDelegates.assemble(
+      databaseService: databaseService,
+      syncService: syncService,
+      getNasPaths: getNasPaths,
+      settingsController: settingsController,
+      player: player,
+      videoController: videoController,
+      mpvBridge: mpvBridge,
+      windowAdapter: windowAdapter,
+      onSetFullScreen: onSetFullScreen,
+      onSaveScreenshot: onSaveScreenshot,
       onChanged: _safeNotify,
     );
+    _persistence = d.persistence;
+    _player = d.player;
+    _videoController = d.videoController;
+    _overlays = d.overlays;
+    _features = d.features;
+    _tracks = d.tracks;
+    _transport = d.transport;
+    _streams = d.streams;
     _bindStreams();
   }
 
-  final PlaybackPersistenceService _persistence;
-  final ProgressSyncService _syncService;
-  final List<String> Function() _getNasPaths;
-  final SettingsController? _settingsController;
-  final PlayerWindowAdapter _windowAdapter;
+  late final PlaybackPersistenceService _persistence;
   late final Player _player;
   late final VideoController _videoController;
-  late final IMpvPropertyBridge _mpvBridge;
   late final PlayerOverlaysController _overlays;
   late final PlayerFeaturesDelegate _features;
-  final List<StreamSubscription<dynamic>> _subscriptions = [];
-  Timer? _hudHideTimer;
-  Timer? _progressTimer;
-  bool _isDisposed = false;
+  late final PlayerTracksDelegate _tracks;
+  late final PlayerTransportDelegate _transport;
+  late final PlayerStreamCoordinator _streams;
   bool _playerDisposed = false;
-  bool _isMenuOrDialogOpen = false;
-  int _openRequestId = 0;
   int? _pendingStartPositionMs;
-  int _lastProgressNotifyMs = 0;
-  int _lastNotifiedPositionSecond = -1;
-
-  final ValueNotifier<({Duration position, Duration duration})> progressListenable =
-      ValueNotifier((position: Duration.zero, duration: Duration.zero));
 
   PlaybackSession? _session;
   int _currentIndex = 0;
   bool _isPlaying = false;
-  bool _isFullscreen = false;
-  bool _isHudVisible = true;
   bool _autoNextDismissed = false;
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
-  double _volume = AppSpacing.volumeMax;
-  double _volumeBeforeMute = AppSpacing.volumeMax;
-  double _playbackSpeed = 1.0;
-  List<AudioTrack> _audioTracks = const [];
-  List<SubtitleTrack> _subtitleTracks = const [];
-  AudioTrack _activeAudioTrack = AudioTrack.auto();
-  SubtitleTrack _activeSubtitleTrack = SubtitleTrack.auto();
   String? _errorMessage;
 
+  ValueNotifier<({Duration position, Duration duration})>
+      get progressListenable => _streams.progressListenable;
   VideoController get videoController => _videoController;
   PlaybackSession? get session => _session;
-  PlaybackQueueEntry? get currentEntry => (_session == null || _session!.queue.isEmpty) ? null : _session!.queue[_currentIndex.clamp(0, _session!.queue.length - 1)];
-  PlaybackQueueEntry? get nextEntry => hasNextEpisode ? _session!.queue[_currentIndex + 1] : null;
+  PlaybackQueueEntry? get currentEntry =>
+      (_session == null || _session!.queue.isEmpty)
+          ? null
+          : _session!.queue[_currentIndex.clamp(0, _session!.queue.length - 1)];
+  PlaybackQueueEntry? get nextEntry =>
+      hasNextEpisode ? _session!.queue[_currentIndex + 1] : null;
   int get currentIndex => _currentIndex;
   bool get hasPreviousEpisode => _currentIndex > 0;
-  bool get hasNextEpisode => _session != null && _currentIndex + 1 < _session!.queue.length;
+  bool get hasNextEpisode =>
+      _session != null && _currentIndex + 1 < _session!.queue.length;
   bool get isPlaying => _isPlaying;
-  bool get isFullscreen => _isFullscreen;
+  bool get isFullscreen => _transport.isFullscreen;
   bool get isMiniPlayer => _features.isMiniPlayer;
-  bool get isHudVisible => _isHudVisible;
+  bool get isHudVisible => _overlays.isHudVisible;
   Duration get position => _position;
   Duration get duration => _duration;
-  double get volume => _volume;
+  double get volume => _transport.volume;
   double get maxVolume => _features.maxVolume;
-  bool get isMuted => _volume <= AppSpacing.volumeMin;
-  double get playbackSpeed => _playbackSpeed;
-  List<AudioTrack> get audioTracks => _audioTracks;
-  List<SubtitleTrack> get subtitleTracks => _subtitleTracks;
-  AudioTrack get activeAudioTrack => _activeAudioTrack;
-  SubtitleTrack get activeSubtitleTrack => _activeSubtitleTrack;
+  bool get isMuted => _transport.isMuted;
+  double get playbackSpeed => _transport.playbackSpeed;
+  List<AudioTrack> get audioTracks => _tracks.audioTracks;
+  List<SubtitleTrack> get subtitleTracks => _tracks.subtitleTracks;
+  AudioTrack get activeAudioTrack => _tracks.activeAudioTrack;
+  SubtitleTrack get activeSubtitleTrack => _tracks.activeSubtitleTrack;
   String? get errorMessage => _errorMessage;
   bool get isNightMode => _features.isNightMode;
   bool get isVolumeBoostEnabled => _features.isVolumeBoostEnabled;
@@ -140,338 +123,340 @@ class SaphirPlayerController extends ChangeNotifier {
   SleepTimerOption get sleepTimerOption => _overlays.sleepTimerOption;
   Duration? get sleepTimerRemaining => _overlays.sleepTimerRemaining;
 
-  int get autoNextRemainingSeconds {
-    if (!hasNextEpisode || _autoNextDismissed || sleepTimerOption == SleepTimerOption.endOfEpisode) return 0;
-    final remainingMs = _duration.inMilliseconds - _position.inMilliseconds;
-    final leadMs = AppSpacing.autoNextLeadSeconds * AppSpacing.millisecondsPerSecond;
-    if (_duration.inMilliseconds <= 0 || remainingMs <= 0 || remainingMs > leadMs) return 0;
-    return (remainingMs / AppSpacing.millisecondsPerSecond).ceil();
-  }
-
+  int get autoNextRemainingSeconds => _features.computeAutoNextRemainingSeconds(
+        hasNextEpisode: hasNextEpisode,
+        autoNextDismissed: _autoNextDismissed,
+        sleepTimerOption: sleepTimerOption,
+        position: _position,
+        duration: _duration,
+      );
   bool get showAutoNextCard => autoNextRemainingSeconds > 0;
-  bool get showIntroSkipButton {
-    if (currentEntry?.mediaType != 'episode' || _errorMessage != null || _duration <= Duration.zero || _features.introSkipped) return false;
-    final maxWindowMs = AppSpacing.introSkipWindowSeconds * AppSpacing.millisecondsPerSecond;
-    final posMs = _position.inMilliseconds;
-    if (posMs >= maxWindowMs) return false;
-    if (_features.nextChapterInIntroWindow(_position) != null) return true;
-    return posMs < effectiveIntroSkipSeconds * AppSpacing.millisecondsPerSecond;
+  bool get showIntroSkipButton => _features.canShowIntroSkipButton(
+        entry: currentEntry,
+        errorMessage: _errorMessage,
+        position: _position,
+        duration: _duration,
+      );
+
+  void dismissAutoNext() {
+    _autoNextDismissed = true;
+    _safeNotify();
   }
 
-  void dismissAutoNext() { _autoNextDismissed = true; _safeNotify(); }
   void dismissIntroSkip() => _features.dismissIntroSkip();
 
-  void _updateProgressNotifier({bool force = false}) {
-    if (_isDisposed) return;
-    final nowMs = DateTime.now().millisecondsSinceEpoch;
-    final posSec = _position.inSeconds;
-    final durChanged = progressListenable.value.duration != _duration;
-    if (force || durChanged || _position == Duration.zero || posSec != _lastNotifiedPositionSecond || nowMs - _lastProgressNotifyMs >= 250) {
-      _lastNotifiedPositionSecond = posSec;
-      _lastProgressNotifyMs = nowMs;
-      progressListenable.value = (position: _position, duration: _duration);
+  void _bindStreams() {
+    _streams.bind(
+      onPlaying: _onPlayingChanged,
+      onPosition: _onPositionChanged,
+      onDuration: _onDurationChanged,
+      onVolume: (vol) {
+        if (_streams.isDisposed) return;
+        _transport.volume = vol;
+        _safeNotify();
+      },
+      onTracks: (tracks) {
+        if (_streams.isDisposed) return;
+        _tracks.onAvailableTracksChanged(
+          tracks,
+          entry: currentEntry,
+          isStale: _streams.captureStaleCheck(),
+        );
+      },
+      onTrack: (track) {
+        if (!_streams.isDisposed) _tracks.onActiveTrackChanged(track);
+      },
+      onCompleted: _onCompletedChanged,
+      onError: (error) {
+        if (_streams.isDisposed || error.trim().isEmpty) return;
+        _streams.stopProgressTimer();
+        _errorMessage = AppStrings.playerPlaybackError;
+        _safeNotify();
+      },
+    );
+  }
+
+  void _onPositionChanged(Duration pos) {
+    if (_streams.isDisposed) return;
+    final prevIntro = showIntroSkipButton;
+    final prevAutoNext = autoNextRemainingSeconds;
+    _position = pos;
+    _streams.updateProgressNotifier(position: _position, duration: _duration);
+    if (showIntroSkipButton != prevIntro ||
+        autoNextRemainingSeconds != prevAutoNext) {
+      _safeNotify();
     }
   }
 
-  void _bindStreams() {
-    _subscriptions.addAll([
-      _player.stream.playing.listen(_onPlayingChanged),
-      _player.stream.position.listen((pos) {
-        final prevIntro = showIntroSkipButton;
-        final prevAutoNext = autoNextRemainingSeconds;
-        _position = pos;
-        _updateProgressNotifier();
-        if (showIntroSkipButton != prevIntro || autoNextRemainingSeconds != prevAutoNext) _safeNotify();
-      }),
-      _player.stream.duration.listen((dur) {
-        _duration = dur;
-        if (dur > Duration.zero && !_features.chaptersLoadedForEntry) {
-          _features.chaptersLoadedForEntry = true;
-          unawaited(_features.loadChapters(() => _isDisposed));
-        }
-        final pendingMs = dur > Duration.zero ? _pendingStartPositionMs : null;
-        if (pendingMs != null) {
-          _pendingStartPositionMs = null;
-          if (pendingMs < dur.inMilliseconds && _position.inMilliseconds < pendingMs - (2 * AppSpacing.millisecondsPerSecond)) {
-            unawaited(_player.seek(Duration(milliseconds: pendingMs)));
-          }
-        }
-        _updateProgressNotifier(force: true);
-        _safeNotify();
-      }),
-      _player.stream.volume.listen((vol) { _volume = vol; _safeNotify(); }),
-      _player.stream.tracks.listen((tracks) {
-        _audioTracks = tracks.audio;
-        _subtitleTracks = tracks.subtitle;
-        _applyTrackPreferences();
-        _safeNotify();
-      }),
-      _player.stream.track.listen((track) { _activeAudioTrack = track.audio; _activeSubtitleTrack = track.subtitle; _safeNotify(); }),
-      _player.stream.completed.listen(_onCompletedChanged),
-      _player.stream.error.listen((error) {
-        if (_isDisposed || error.trim().isEmpty) return;
-        _stopProgressTimer();
-        _errorMessage = AppStrings.playerPlaybackError;
-        _safeNotify();
-      }),
-    ]);
+  void _onDurationChanged(Duration dur) {
+    if (_streams.isDisposed) return;
+    _duration = dur;
+    unawaited(
+      _transport.applyDurationPostActions(
+        duration: dur,
+        position: _position,
+        pendingStartPositionMs: _pendingStartPositionMs,
+        clearPendingStartPosition: () => _pendingStartPositionMs = null,
+        isStale: _streams.captureStaleCheck(),
+      ),
+    );
+    _streams.updateProgressNotifier(
+      position: _position,
+      duration: _duration,
+      force: true,
+    );
+    _safeNotify();
   }
 
   void _onPlayingChanged(bool playing) {
+    if (_streams.isDisposed) return;
     _isPlaying = playing;
     if (!playing) {
       _persistence.recordWatchHistorySlice(currentEntry, isPlaying: false);
-      _stopProgressTimer();
+      _streams.stopProgressTimer();
       _persistProgress(syncRemote: true);
-      showHud(keepVisibleWhilePaused: true);
+      _overlays.showHud(isPlaying: false, keepVisibleWhilePaused: true);
     } else {
       _persistence.startPlaySegmentIfNeeded();
-      _startProgressTimer();
+      _streams.startProgressTimer(() => _persistProgress(syncRemote: false));
       registerUserActivity();
     }
     _safeNotify();
   }
 
   Future<void> _onCompletedChanged(bool completed) async {
-    if (_isDisposed || !completed) return;
+    if (_streams.isDisposed || !completed) return;
+    final isStale = _streams.captureStaleCheck();
     _persistProgress(forceCompleted: true, syncRemote: true);
-    if (sleepTimerOption == SleepTimerOption.endOfEpisode) {
-      _overlays.cancelSleepTimer();
-      await _player.pause();
-      _overlays.showActionOsd(PlayerActionOsdKind.sleepTimer, AppStrings.sleepTimerTriggeredOsd);
-      return;
-    }
-    if (hasNextEpisode && !_autoNextDismissed) await playNextEpisode(skipPersist: true);
-  }
-  void _startProgressTimer() {
-    _progressTimer?.cancel();
-    _progressTimer = Timer.periodic(const Duration(seconds: AppSpacing.progressSaveIntervalSeconds), (_) => _persistProgress(syncRemote: false));
-  }
-  void _stopProgressTimer() { _progressTimer?.cancel(); _progressTimer = null; }
-  void _applyTrackPreferences() {
-    final sid = currentEntry?.seriesId;
-    final prefs = sid != null ? _persistence.loadSeriesPreferences(sid) : null;
-    if (prefs != null) _features.seriesIntroSkipSeconds = prefs.introSkipSeconds;
-    final resolved = TrackPreferenceResolver.resolve(
-      seriesPreferences: prefs, audioTracks: _audioTracks, subtitleTracks: _subtitleTracks,
-      activeAudioTrack: _activeAudioTrack, activeSubtitleTrack: _activeSubtitleTrack,
-      subtitlesEnabledByDefault: _settingsController?.subtitlesEnabledByDefault ?? false,
-      preferredSubtitleLanguage: _settingsController?.preferredSubtitleLanguage ?? AppStrings.subtitleLangCodeDe,
+    final handled = await _transport.handleSleepTimerAtCompletion(
+      isStale: isStale,
     );
-    if (resolved.audio != null) _player.setAudioTrack(resolved.audio!);
-    if (resolved.subtitle != null) _player.setSubtitleTrack(resolved.subtitle!);
-  }
-  void _saveSeriesPreferences(AudioTrack audio, SubtitleTrack subtitle) {
-    final seriesId = currentEntry?.seriesId;
-    if (seriesId == null || (audio.id == 'auto' && subtitle.id == 'auto')) return;
-    _persistence.saveSeriesPreferences(seriesId, audio.id, subtitle.id);
-  }
-  Future<void> startSession(PlaybackSession newSession) async {
-    if (newSession.queue.isEmpty) return;
-    _session = newSession;
-    _currentIndex = newSession.initialIndex.clamp(0, newSession.queue.length - 1);
-    await _openEntryAtIndex(_currentIndex);
+    if (handled || isStale()) return;
+    if (hasNextEpisode && !_autoNextDismissed) {
+      await playNextEpisode(skipPersist: true);
+    }
   }
 
-  Future<void> _openEntryAtIndex(int index) async {
-    final s = _session;
-    if (_isDisposed || s == null || index < 0 || index >= s.queue.length) return;
-    final requestId = ++_openRequestId;
-    _currentIndex = index;
+  void _resetTransientEntryFields({required bool closeOverlays}) {
+    _streams.stopProgressTimer();
+    if (closeOverlays) {
+      _overlays.resetForClose();
+    } else {
+      _overlays.resetForEntry();
+    }
+    _persistence.resetHistoryTracking();
+    _tracks.resetForEntry();
+    _isPlaying = false;
     _autoNextDismissed = false;
     _errorMessage = null;
     _position = Duration.zero;
     _duration = Duration.zero;
-    _persistence.resetHistoryTracking();
+    _pendingStartPositionMs = null;
+  }
+
+  Future<void> startSession(PlaybackSession newSession) async {
+    if (_streams.isDisposed || newSession.queue.isEmpty) return;
+    if (_session != null) {
+      _persistence.recordWatchHistorySlice(currentEntry, isPlaying: false);
+      _persistProgress(syncRemote: false);
+    }
+    await _resetSessionState();
+    if (_streams.isDisposed) return;
+    _session = newSession;
+    _currentIndex =
+        newSession.initialIndex.clamp(0, newSession.queue.length - 1);
+    await _openEntryAtIndex(_currentIndex);
+  }
+
+  Future<void> _resetSessionState({bool forceMpvReset = false}) async {
+    _streams.bumpRequestId();
+    _resetTransientEntryFields(closeOverlays: true);
+    await _transport.resetForSession(forceMpvReset: forceMpvReset);
+    await _features.resetSessionState(forceMpvReset: forceMpvReset);
+    _streams.updateProgressNotifier(
+      position: _position,
+      duration: _duration,
+      force: true,
+    );
+  }
+
+  Future<void> _openEntryAtIndex(int index) async {
+    final s = _session;
+    if (_streams.isDisposed ||
+        s == null ||
+        index < 0 ||
+        index >= s.queue.length) {
+      return;
+    }
+    final requestId = _streams.bumpRequestId();
+    bool isStale() => _streams.isStale(requestId);
+    _currentIndex = index;
+    _resetTransientEntryFields(closeOverlays: false);
     final entry = s.queue[_currentIndex];
-    final startPosMs = _persistence.loadSavedResumePositionMs(entry.mediaKey) ?? entry.startPositionMs;
+    final startPosMs = _persistence.loadSavedResumePositionMs(entry.mediaKey) ??
+        entry.startPositionMs;
     _pendingStartPositionMs = startPosMs > 0 ? startPosMs : null;
-    _features.resetForEntry(entry);
-    _updateProgressNotifier(force: true);
+    _streams.updateProgressNotifier(
+      position: _position,
+      duration: _duration,
+      force: true,
+    );
     _safeNotify();
-    final status = await LocalFileService.checkPlayableFile(entry.filePath);
-    if (_isDisposed || requestId != _openRequestId) return;
-    if (status != PlayableFileStatus.ok) {
-      _errorMessage = status == PlayableFileStatus.missing ? AppStrings.playerFileMissingError : AppStrings.playerEmptyFileError;
+    final result = await _transport.prepareAndOpenEntry(
+      entry,
+      startPosMs: startPosMs,
+      isStale: isStale,
+    );
+    if (isStale()) return;
+    if (!result.opened) {
+      _errorMessage = result.errorMessage;
       _safeNotify();
       return;
     }
-    try {
-      await _mpvBridge.setHardwareDecoding(_settingsController?.hardwareAccelerationEnabled ?? true);
-      await _mpvBridge.setProperty('start', 'none');
-      await _player.open(Media(entry.filePath, start: startPosMs > 0 ? Duration(milliseconds: startPosMs) : null), play: true);
-      if (_isDisposed || requestId != _openRequestId) return;
-      await _features.applySubtitleStyle();
-    } catch (_) {
-      if (_isDisposed || requestId != _openRequestId) return;
-      _errorMessage = AppStrings.playerPlaybackError;
-      _safeNotify();
-      return;
-    }
-    if (_isDisposed || requestId != _openRequestId) return;
-    _startProgressTimer();
+    _streams.startProgressTimer(() => _persistProgress(syncRemote: false));
     registerUserActivity();
   }
 
-  Future<void> togglePlayPause() async { registerUserActivity(); await _player.playOrPause(); }
-  Future<void> seekRelativeSeconds(int deltaSeconds) async {
-    final targetMs = (_position.inMilliseconds + (deltaSeconds * AppSpacing.millisecondsPerSecond)).clamp(0, _duration.inMilliseconds > 0 ? _duration.inMilliseconds : 1 << 30);
-    await _player.seek(Duration(milliseconds: targetMs));
-    _overlays.showActionOsd(deltaSeconds >= 0 ? PlayerActionOsdKind.seekForward : PlayerActionOsdKind.seekBack, Formatters.formatSeekOsd(deltaSeconds));
-  }
-  Future<void> seekToRatio(double ratio) async {
-    registerUserActivity();
-    if (_duration.inMilliseconds <= 0) return;
-    await _player.seek(Duration(milliseconds: (_duration.inMilliseconds * ratio.clamp(0.0, 1.0)).round()));
-  }
-  Future<void> adjustVolume(double delta) async {
-    final next = (_volume + delta).clamp(AppSpacing.volumeMin, maxVolume);
-    await _player.setVolume(next);
-    _overlays.showActionOsd(PlayerActionOsdKind.volume, Formatters.formatVolumePercent(next));
-  }
-  Future<void> toggleMute() async {
-    if (isMuted) {
-      final restored = _volumeBeforeMute > AppSpacing.volumeMin ? _volumeBeforeMute.clamp(AppSpacing.volumeMin, maxVolume) : AppSpacing.volumeMax;
-      await _player.setVolume(restored);
-      _overlays.showActionOsd(PlayerActionOsdKind.mute, AppStrings.osdMuteOff);
-    } else {
-      _volumeBeforeMute = _volume;
-      await _player.setVolume(AppSpacing.volumeMin);
-      _overlays.showActionOsd(PlayerActionOsdKind.mute, AppStrings.osdMuteOn);
-    }
-  }
-  Future<void> setPlaybackSpeed(double speed) async {
-    _playbackSpeed = speed;
-    await _player.setRate(speed);
-    _overlays.showActionOsd(PlayerActionOsdKind.speed, Formatters.formatPlaybackSpeed(speed));
-    _safeNotify();
-  }
-  Future<void> playNextEpisode({bool skipPersist = false}) => _switchEpisode(_currentIndex + 1, hasNextEpisode, skipPersist: skipPersist);
-  Future<void> playPreviousEpisode() => _switchEpisode(_currentIndex - 1, hasPreviousEpisode);
-  Future<void> _switchEpisode(int index, bool allowed, {bool skipPersist = false}) async {
+  Future<void> togglePlayPause() =>
+      _transport.togglePlayPause(isPlaying: _isPlaying);
+  Future<void> seekRelativeSeconds(int deltaSeconds) =>
+      _transport.seekRelativeSeconds(deltaSeconds,
+          position: _position, duration: _duration);
+  Future<void> seekToRatio(double ratio) =>
+      _transport.seekToRatio(ratio, duration: _duration, isPlaying: _isPlaying);
+  Future<void> adjustVolume(double delta) => _transport.adjustVolume(delta);
+  Future<void> toggleMute() => _transport.toggleMute();
+  Future<void> setPlaybackSpeed(double speed) =>
+      _transport.setPlaybackSpeed(speed);
+  Future<void> playNextEpisode({bool skipPersist = false}) =>
+      _switchEpisode(_currentIndex + 1, hasNextEpisode,
+          skipPersist: skipPersist);
+  Future<void> playPreviousEpisode() =>
+      _switchEpisode(_currentIndex - 1, hasPreviousEpisode);
+
+  Future<void> _switchEpisode(int index, bool allowed,
+      {bool skipPersist = false}) async {
     if (!allowed) return;
-    _stopProgressTimer();
+    _streams.stopProgressTimer();
     if (!skipPersist) _persistProgress(syncRemote: true);
     await _openEntryAtIndex(index);
   }
+
   Future<void> playEntryAtIndex(int index) async {
-    if (_session == null || index < 0 || index >= _session!.queue.length) return;
+    if (_session == null || index < 0 || index >= _session!.queue.length) {
+      return;
+    }
     _overlays.closeEpisodeDrawer();
-    _stopProgressTimer();
+    _streams.stopProgressTimer();
     _persistProgress(syncRemote: true);
     await _openEntryAtIndex(index);
   }
-  Future<void> selectAudioTrack(AudioTrack track) async {
+
+  Future<void> selectAudioTrack(AudioTrack track) {
     registerUserActivity();
-    _activeAudioTrack = track;
-    await _player.setAudioTrack(track);
-    _saveSeriesPreferences(_activeAudioTrack, _activeSubtitleTrack);
+    return _tracks.selectAudioTrack(track,
+        entry: currentEntry, isStale: _streams.captureStaleCheck());
   }
-  Future<void> selectSubtitleTrack(SubtitleTrack track) async {
+
+  Future<void> selectSubtitleTrack(SubtitleTrack track) {
     registerUserActivity();
-    _activeSubtitleTrack = track;
-    await _player.setSubtitleTrack(track);
-    _saveSeriesPreferences(_activeAudioTrack, _activeSubtitleTrack);
+    return _tracks.selectSubtitleTrack(track,
+        entry: currentEntry, isStale: _streams.captureStaleCheck());
   }
+
+  Future<void> loadExternalSubtitle(String dialogTitle) =>
+      _features.loadExternalSubtitle(
+        dialogTitle,
+        isStale: _streams.captureStaleCheck(),
+        onTrackSelected: _tracks.setExternalSubtitleActive,
+      );
+
   Future<void> toggleNightMode() => _features.toggleNightMode();
-  Future<void> toggleVolumeBoost() => _features.toggleVolumeBoost(_volume);
+  Future<void> toggleVolumeBoost() => _features.toggleVolumeBoost(volume);
   Future<void> setAspectMode(VideoAspectMode m) => _features.setAspectMode(m);
-  Future<void> cycleAspectMode() => setAspectMode(VideoAspectMode.values[(_features.aspectMode.index + 1) % VideoAspectMode.values.length]);
+  Future<void> cycleAspectMode() => setAspectMode(VideoAspectMode.values[
+      (_features.aspectMode.index + 1) % VideoAspectMode.values.length]);
   Future<void> adjustAudioDelay(int ms) => _features.adjustAudioDelay(ms);
   Future<void> resetAudioDelay() => adjustAudioDelay(-audioDelayMs);
   Future<void> adjustSubtitleDelay(int ms) => _features.adjustSubtitleDelay(ms);
   Future<void> resetSubtitleDelay() => adjustSubtitleDelay(-subtitleDelayMs);
-  Future<void> loadExternalSubtitle(String dialogTitle) async {
-    final path = await _windowAdapter.pickSubtitleFile(dialogTitle);
-    if (path == null || _isDisposed) return;
-    final track = SubtitleTrack.uri(path);
-    _activeSubtitleTrack = track;
-    await _player.setSubtitleTrack(track);
-    _overlays.showActionOsd(PlayerActionOsdKind.subtitle, AppStrings.osdExternalSubLoaded);
-  }
-  Future<void> updateLiveSubtitleStyle({double? scale, int? position, double? bgOpacity}) => _features.updateLiveSubtitleStyle(scale: scale, position: position, bgOpacity: bgOpacity);
-  PlayerChapter? chapterAtPosition(Duration pos) => _features.chapterAtPosition(pos);
+  Future<void> updateLiveSubtitleStyle(
+          {double? scale, int? position, double? bgOpacity}) =>
+      _features.updateLiveSubtitleStyle(
+          scale: scale, position: position, bgOpacity: bgOpacity);
+  PlayerChapter? chapterAtPosition(Duration pos) =>
+      _features.chapterAtPosition(pos);
   Future<void> jumpToNextChapter() => _features.jumpToNextChapter(_position);
-  Future<void> jumpToPreviousChapter() => _features.jumpToPreviousChapter(_position);
-  Future<void> skipIntro() => _features.skipIntro(currentEntry, _position, _duration);
-  void setSeriesIntroSkipSeconds(int s) => _features.setSeriesIntroSkipSeconds(currentEntry?.seriesId, s);
-  void addBookmarkAtCurrentPosition({String label = ''}) => _features.addBookmark(currentEntry, _position, label);
+  Future<void> jumpToPreviousChapter() =>
+      _features.jumpToPreviousChapter(_position);
+  Future<void> skipIntro() =>
+      _features.skipIntro(currentEntry, _position, _duration);
+  void setSeriesIntroSkipSeconds(int s) =>
+      _features.setSeriesIntroSkipSeconds(currentEntry?.seriesId, s);
+  void addBookmarkAtCurrentPosition({String label = ''}) =>
+      _features.addBookmark(currentEntry, _position, label);
   void deleteBookmark(int id) => _features.deleteBookmark(currentEntry, id);
   Future<void> seekToBookmark(MediaBookmark bm) => _features.seekToBookmark(bm);
-  Future<String?> captureScreenshot() => _features.captureScreenshot(currentEntry);
+  Future<String?> captureScreenshot() => _features
+      .captureScreenshot(currentEntry, isStale: _streams.captureStaleCheck());
   void cycleTimeDisplayMode() => _features.cycleTimeDisplayMode();
-  String formatRightTimeLabel({DateTime? now}) => _features.formatRightTimeLabel(_position, _duration, _playbackSpeed, now ?? DateTime.now());
-  Future<void> stepFrame({required bool forward}) async {
-    if (_isPlaying) await _player.pause();
-    await _mpvBridge.sendCommand([forward ? 'frame-step' : 'frame-back-step']);
-    _overlays.showActionOsd(PlayerActionOsdKind.frameStep, forward ? AppStrings.osdFrameStepForward : AppStrings.osdFrameStepBack);
-  }
-  void showActionOsd(PlayerActionOsdKind kind, String message) => _overlays.showActionOsd(kind, message);
+  String formatRightTimeLabel({DateTime? now}) =>
+      _features.formatRightTimeLabel(
+          _position, _duration, playbackSpeed, now ?? DateTime.now());
+  Future<void> stepFrame({required bool forward}) =>
+      _features.stepFrame(forward: forward, isPlaying: _isPlaying);
+  void showActionOsd(PlayerActionOsdKind kind, String message) =>
+      _overlays.showActionOsd(kind, message);
   void toggleDiagnostics() => _overlays.toggleDiagnostics();
   void toggleEpisodeDrawer() => _overlays.toggleEpisodeDrawer();
   void toggleShortcutSheet() => _overlays.toggleShortcutSheet();
   bool closeTopOverlay() => _overlays.closeTopOverlay();
-  void setSleepTimer(SleepTimerOption option, {Duration? customDuration}) {
-    _overlays.setSleepTimer(option, customDuration: customDuration, onExpired: () async {
-      if (_isDisposed) return;
-      await _player.pause();
-      _overlays.showActionOsd(PlayerActionOsdKind.sleepTimer, AppStrings.sleepTimerTriggeredOsd);
-    });
-    _overlays.showActionOsd(PlayerActionOsdKind.sleepTimer, option == SleepTimerOption.off ? AppStrings.osdSleepTimerOff : '${AppStrings.osdSleepTimerSetPrefix} ${Formatters.formatSleepTimerOptionLabel(option)}');
-  }
-  Future<void> toggleMiniPlayer() async {
-    if (_features.isMiniPlayer) { await _features.exitMiniPlayer(); return; }
-    if (_isFullscreen) { _isFullscreen = false; await _windowAdapter.setFullScreen(false); }
-    await _features.enterMiniPlayer();
-  }
-  Future<void> startMiniPlayerWindowDrag() => _windowAdapter.startWindowDragging();
-  Future<void> toggleFullscreen() async {
-    if (_features.isMiniPlayer) await _features.exitMiniPlayer();
-    registerUserActivity();
-    _isFullscreen = !_isFullscreen;
-    await _windowAdapter.setFullScreen(_isFullscreen);
-    _safeNotify();
-  }
-  void setMenuOrDialogOpen(bool open) {
-    _isMenuOrDialogOpen = open;
-    if (open) { _hudHideTimer?.cancel(); _isHudVisible = true; _safeNotify(); } else { registerUserActivity(); }
-  }
-  void registerUserActivity() => showHud(keepVisibleWhilePaused: !_isPlaying);
-  void showHud({bool keepVisibleWhilePaused = false}) {
-    if (!_isHudVisible) { _isHudVisible = true; _safeNotify(); }
-    _hudHideTimer?.cancel();
-    if (keepVisibleWhilePaused || _isMenuOrDialogOpen) return;
-    _hudHideTimer = Timer(const Duration(seconds: AppSpacing.hudAutoHideSeconds), () {
-      if (!_isDisposed && _isPlaying && _isHudVisible && !_isMenuOrDialogOpen) { _isHudVisible = false; _safeNotify(); }
-    });
-  }
+  void setSleepTimer(SleepTimerOption option, {Duration? customDuration}) =>
+      _transport.setSleepTimer(option,
+          customDuration: customDuration,
+          isStale: _streams.captureStaleCheck());
+  Future<void> toggleMiniPlayer() => _transport.toggleMiniPlayer();
+  Future<void> startMiniPlayerWindowDrag() =>
+      _transport.startMiniPlayerWindowDrag();
+  Future<void> toggleFullscreen() =>
+      _transport.toggleFullscreen(isPlaying: _isPlaying);
+  void setMenuOrDialogOpen(bool open) =>
+      _overlays.setMenuOrDialogOpen(open, isPlaying: _isPlaying);
+  void registerUserActivity() =>
+      _overlays.registerUserActivity(isPlaying: _isPlaying);
+  void showHud({bool keepVisibleWhilePaused = false}) => _overlays.showHud(
+      isPlaying: _isPlaying, keepVisibleWhilePaused: keepVisibleWhilePaused);
+
   Future<void> stopAndClose() async {
-    _openRequestId++; _isMenuOrDialogOpen = false;
-    _hudHideTimer?.cancel(); _stopProgressTimer(); _overlays.resetForClose();
     _persistence.recordWatchHistorySlice(currentEntry, isPlaying: false);
     _persistProgress(syncRemote: true);
-    _playbackSpeed = 1.0; await _player.setRate(1.0);
-    await _features.resetForClose(); await _player.stop(); await _features.exitMiniPlayer();
-    if (_isFullscreen) { _isFullscreen = false; await _windowAdapter.setFullScreen(false); }
-    _persistence.resetHistoryTracking();
-    _position = Duration.zero; _duration = Duration.zero;
-    _updateProgressNotifier(force: true); _session = null; _safeNotify();
+    await _resetSessionState(forceMpvReset: true);
+    await _player.stop();
+    await _transport.exitWindowStatesOnClose();
+    _session = null;
+    _safeNotify();
   }
-  void _persistProgress({bool forceCompleted = false, bool syncRemote = false}) {
-    final entry = currentEntry;
-    if (entry == null) return;
-    if (_isPlaying) _persistence.recordWatchHistorySlice(entry, isPlaying: true);
-    _persistence.persistProgress(entry: entry, positionMs: _position.inMilliseconds, durationMs: _duration.inMilliseconds, forceCompleted: forceCompleted);
-    if (syncRemote) unawaited(_syncService.syncWithRoots(_getNasPaths()));
+
+  void _persistProgress(
+          {bool forceCompleted = false, bool syncRemote = false}) =>
+      _streams.persistProgress(
+        entry: currentEntry,
+        isPlaying: _isPlaying,
+        position: _position,
+        duration: _duration,
+        forceCompleted: forceCompleted,
+        syncRemote: syncRemote,
+      );
+
+  void _safeNotify() {
+    if (!_streams.isDisposed) notifyListeners();
   }
-  void _safeNotify() { if (!_isDisposed) notifyListeners(); }
+
   void _teardownResources() {
-    _isDisposed = true; _openRequestId++; _isMenuOrDialogOpen = false;
-    _hudHideTimer?.cancel(); _stopProgressTimer();
-    _overlays.dispose(); progressListenable.dispose();
-    for (final sub in _subscriptions) { sub.cancel(); }
-    _subscriptions.clear();
+    _streams.dispose();
+    _overlays.dispose();
   }
+
   Future<void> disposeForShutdown() async {
     if (_playerDisposed) return;
     _persistence.recordWatchHistorySlice(currentEntry, isPlaying: false);
@@ -482,10 +467,14 @@ class SaphirPlayerController extends ChangeNotifier {
     _playerDisposed = true;
     await _player.dispose();
   }
+
   @override
   void dispose() {
-    if (!_isDisposed) _teardownResources();
-    if (!_playerDisposed) { _playerDisposed = true; unawaited(_player.dispose()); }
+    if (!_streams.isDisposed) _teardownResources();
+    if (!_playerDisposed) {
+      _playerDisposed = true;
+      unawaited(_player.dispose());
+    }
     super.dispose();
   }
 }

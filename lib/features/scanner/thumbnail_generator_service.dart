@@ -28,6 +28,9 @@ class ThumbnailGeneratorService {
   static void killActiveProcesses() =>
       ThumbnailFfmpegRunner.killActiveProcesses();
 
+  static Future<int> terminateActiveProcesses() =>
+      ThumbnailFfmpegRunner.terminateActiveProcesses();
+
   @visibleForTesting
   static void resetExecutableCacheForTesting() =>
       ThumbnailFfmpegRunner.resetExecutableCache();

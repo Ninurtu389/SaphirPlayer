@@ -1,7 +1,9 @@
 import '../../features/library/library_models.dart';
 import '../../features/player/player_models.dart';
+import '../../features/scanner/scan_models.dart';
 import '../constants/app_spacing.dart';
 import '../constants/app_strings.dart';
+import '../models/media_source_models.dart';
 
 class Formatters {
   Formatters._();
@@ -15,8 +17,8 @@ class Formatters {
     final totalSeconds =
         value.inSeconds.clamp(0, AppSpacing.maxPlayerDurationSeconds);
     final hours = totalSeconds ~/ AppSpacing.secondsPerHour;
-    final minutes =
-        (totalSeconds % AppSpacing.secondsPerHour) ~/ AppSpacing.secondsPerMinute;
+    final minutes = (totalSeconds % AppSpacing.secondsPerHour) ~/
+        AppSpacing.secondsPerMinute;
     final seconds = totalSeconds % AppSpacing.secondsPerMinute;
     final mm = minutes.toString().padLeft(2, '0');
     final ss = seconds.toString().padLeft(2, '0');
@@ -257,5 +259,87 @@ class Formatters {
       case SleepTimerOption.minutes60:
         return AppStrings.sleepTimer60MinLabel;
     }
+  }
+
+  static String formatDateTimeShort(int epochMs) {
+    final dt = DateTime.fromMillisecondsSinceEpoch(epochMs);
+    final dd = dt.day.toString().padLeft(2, '0');
+    final mm = dt.month.toString().padLeft(2, '0');
+    final hh = dt.hour.toString().padLeft(2, '0');
+    final min = dt.minute.toString().padLeft(2, '0');
+    return '$dd.$mm.${dt.year} $hh:$min';
+  }
+
+  static String formatCompactPath(
+    String fullPath, {
+    int maxLength = AppSpacing.compactPathMaxLength,
+  }) {
+    final trimmed = fullPath.trim();
+    if (trimmed.length <= maxLength || maxLength < 10) {
+      return trimmed;
+    }
+    final headLen = (maxLength * 0.45).floor();
+    final tailLen = maxLength - headLen - 3;
+    if (tailLen <= 2) {
+      return '${trimmed.substring(0, maxLength - 3)}...';
+    }
+    return '${trimmed.substring(0, headLen)}...${trimmed.substring(trimmed.length - tailLen)}';
+  }
+
+  static String formatScanPhaseLabel(ScanPhase phase) {
+    switch (phase) {
+      case ScanPhase.enumerating:
+        return AppStrings.scanPhaseEnumerating;
+      case ScanPhase.readingMetadata:
+        return AppStrings.scanPhaseReadingMetadata;
+      case ScanPhase.applyingDiff:
+        return AppStrings.scanPhaseApplyingDiff;
+      case ScanPhase.generatingThumbnails:
+        return AppStrings.scanPhaseGeneratingThumbnails;
+      case ScanPhase.failed:
+        return AppStrings.scanFailedStatus;
+      case ScanPhase.paused:
+        return AppStrings.scanPausedStatus;
+      case ScanPhase.idle:
+      case ScanPhase.completed:
+        return AppStrings.scanningStatus;
+    }
+  }
+
+  static String formatSourceStatusLabel(MediaSourceEntry source) {
+    if (source.isDisabled) {
+      return AppStrings.sourceStatusDisabled;
+    }
+    switch (source.lastScanStatus) {
+      case 'complete':
+        return AppStrings.sourceStatusComplete;
+      case 'partial':
+        return AppStrings.sourceStatusPartial;
+      case 'unreachable':
+        return AppStrings.sourceStatusUnreachable;
+      case 'cancelled':
+        return AppStrings.sourceStatusCancelled;
+      case 'failed':
+        return AppStrings.sourceStatusFailed;
+      default:
+        return AppStrings.sourceStatusActive;
+    }
+  }
+
+  static String formatSourceMetrics(MediaSourceEntry source) {
+    final scanText = source.lastSuccessScanAt != null
+        ? '${AppStrings.sourceLastSuccessPrefix} ${formatDateTimeShort(source.lastSuccessScanAt!)}'
+        : AppStrings.sourceNeverScannedLabel;
+    if (source.lastScanAt == null) {
+      return scanText;
+    }
+    final base = '$scanText${AppStrings.metadataSeparator}'
+        '${source.lastMediaFound} ${AppStrings.sourceMediaLabel} · '
+        '${source.lastFilesExamined} ${AppStrings.sourceFilesLabel}';
+    if (source.lastErrorCount > 0) {
+      return '$base${AppStrings.metadataSeparator}'
+          '${source.lastErrorCount} ${AppStrings.sourceErrorsLabel}';
+    }
+    return base;
   }
 }

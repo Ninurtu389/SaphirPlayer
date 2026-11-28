@@ -71,11 +71,13 @@ void main() {
     );
   }
 
-  test('subtitle priority: series preference overrides global setting and passive emitTrack preserves global defaults',
+  test(
+      'subtitle priority: series preference overrides global setting and passive emitTrack preserves global defaults',
       () async {
     final ep1 = createSyntheticMp4HeaderFile(mediaDir, 'ep1.mp4');
     settingsController.updateSubtitlesDefaultEnabled(true);
-    settingsController.updatePreferredSubtitleLanguage(AppStrings.subtitleLangCodeEn);
+    settingsController
+        .updatePreferredSubtitleLanguage(AppStrings.subtitleLangCodeEn);
 
     await controller.startSession(makeEpisodeSession([ep1.path]));
 
@@ -107,9 +109,26 @@ void main() {
     ));
     await Future<void>.delayed(Duration.zero);
     expect(harness.selectedSubtitleTracks.last.id, 'deu');
+
+    // Episode 2 with numeric IDs still matches German via language alias
+    final ep2 = createSyntheticMp4HeaderFile(mediaDir, 'ep2.mp4');
+    await controller.startSession(makeEpisodeSession([ep1.path, ep2.path]));
+    await controller.playNextEpisode();
+    harness.selectedSubtitleTracks.clear();
+    harness.emitTracks(Tracks(
+      audio: [AudioTrack.auto()],
+      subtitle: [
+        SubtitleTrack.auto(),
+        const SubtitleTrack('1', 'English', 'eng'),
+        const SubtitleTrack('8', 'Deutsch', 'ger'),
+      ],
+    ));
+    await Future<void>.delayed(Duration.zero);
+    expect(harness.selectedSubtitleTracks.last.id, '8');
   });
 
-  test('audio/video modes: night mode, 150% boost, aspect modes, sync, external sub, style',
+  test(
+      'audio/video modes: night mode, 150% boost, aspect modes, sync, external sub, style',
       () async {
     final ep1 = createSyntheticMp4HeaderFile(mediaDir, 'ep1.mp4');
     await controller.startSession(makeEpisodeSession([ep1.path]));
@@ -117,10 +136,12 @@ void main() {
     await controller.toggleNightMode();
     expect(controller.isNightMode, isTrue);
     expect(bridge.nightModeHistory, [true]);
-    expect(bridge.commands.last, ['af', 'add', 'lavfi=[dynaudnorm=f=150:g=15]']);
+    expect(
+        bridge.commands.last, ['af', 'add', 'lavfi=[dynaudnorm=f=150:g=15]']);
 
     await controller.toggleNightMode();
-    expect(bridge.commands.last, ['af', 'remove', 'lavfi=[dynaudnorm=f=150:g=15]']);
+    expect(bridge.commands.last,
+        ['af', 'remove', 'lavfi=[dynaudnorm=f=150:g=15]']);
 
     await controller.toggleVolumeBoost();
     expect(controller.isVolumeBoostEnabled, isTrue);
@@ -154,12 +175,14 @@ void main() {
     await controller.loadExternalSubtitle('Pick');
     expect(harness.selectedSubtitleTracks.last.id, r'D:\Subs\ep1.srt');
 
-    await controller.updateLiveSubtitleStyle(scale: 1.5, position: 80, bgOpacity: 0.4);
+    await controller.updateLiveSubtitleStyle(
+        scale: 1.5, position: 80, bgOpacity: 0.4);
     expect(bridge.subtitleStyleHistory.last.scale, 1.5);
     expect(bridge.subtitleStyleHistory.last.pos, 80);
   });
 
-  test('chapters, intro skip, dismissIntroSkip, bookmarks, and 1-click screenshot',
+  test(
+      'chapters, intro skip, dismissIntroSkip, bookmarks, and 1-click screenshot',
       () async {
     final ep1 = createSyntheticMp4HeaderFile(mediaDir, 'ep1.mp4');
     final ep2 = createSyntheticMp4HeaderFile(mediaDir, 'ep2.mp4');
@@ -211,7 +234,8 @@ void main() {
     expect(shotPath.startsWith(shotDir), isTrue);
   });
 
-  test('episode drawer switch, sleep timer, mini-player from maximized, hwdec, and stopAndClose reset',
+  test(
+      'episode drawer switch, sleep timer, mini-player from maximized, hwdec, and stopAndClose reset',
       () async {
     final ep1 = createSyntheticMp4HeaderFile(mediaDir, 'ep1.mp4');
     final ep2 = createSyntheticMp4HeaderFile(mediaDir, 'ep2.mp4');
@@ -272,7 +296,8 @@ void main() {
     expect(controller.isMiniPlayer, isFalse);
     expect(harness.maximizeCount, 1);
     expect(harness.alwaysOnTopStates.last, isFalse);
-    expect(harness.windowBoundsHistory.last, const Rect.fromLTWH(100, 100, 1280, 800));
+    expect(harness.windowBoundsHistory.last,
+        const Rect.fromLTWH(100, 100, 1280, 800));
     expect(controller.playbackSpeed, 1.0);
     expect(controller.audioDelayMs, 0);
     expect(controller.subtitleDelayMs, 0);
@@ -281,7 +306,8 @@ void main() {
     expect(controller.progressListenable.value.duration, Duration.zero);
   });
 
-  test('intro skip hides after configured seconds, progressListenable decouples position notifications, and duration_ms backfills',
+  test(
+      'intro skip hides after configured seconds, progressListenable decouples position notifications, and duration_ms backfills',
       () async {
     final ep1 = createSyntheticMp4HeaderFile(mediaDir, 'ep1.mp4');
     final ep2 = createSyntheticMp4HeaderFile(mediaDir, 'ep2.mp4');
@@ -318,7 +344,8 @@ void main() {
       ),
     );
 
-    expect(harness.openedMedia.first.start, const Duration(milliseconds: 120000));
+    expect(
+        harness.openedMedia.first.start, const Duration(milliseconds: 120000));
     expect(bridge.properties['start'], 'none');
 
     // Switch to episode 2 starting at 0, verify intro skip auto-hides after configured duration
@@ -336,13 +363,15 @@ void main() {
     harness.emitPosition(const Duration(seconds: 40, milliseconds: 200));
     await Future<void>.delayed(Duration.zero);
     expect(notifyCount, 0);
-    expect(controller.progressListenable.value.position, const Duration(seconds: 40));
+    expect(controller.progressListenable.value.position,
+        const Duration(seconds: 40));
     expect(controller.showIntroSkipButton, isTrue);
 
     harness.emitPosition(const Duration(seconds: 41));
     await Future<void>.delayed(Duration.zero);
     expect(notifyCount, 0);
-    expect(controller.progressListenable.value.position, const Duration(seconds: 41));
+    expect(controller.progressListenable.value.position,
+        const Duration(seconds: 41));
 
     harness.emitPosition(const Duration(seconds: 60));
     await Future<void>.delayed(Duration.zero);

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:path/path.dart' as p;
+import '../constants/app_strings.dart';
 import 'database_service.dart';
 import 'portable_paths.dart';
 import 'sync_lock.dart';
@@ -79,25 +80,68 @@ class ProgressSyncService {
     return (path: p.join(dataDir, _syncFileName), isNas: false);
   }
 
-  Future<SyncResult> syncWithRoots(List<String> nasRootPaths) {
+  SyncResult _cancelledResult({
+    String targetPath = '',
+    bool nasTargetUnreachable = false,
+  }) =>
+      SyncResult(
+        syncedToNas: false,
+        targetPath: targetPath,
+        status: SyncStatus.cancelled,
+        message: AppStrings.syncCancelledStatus,
+        nasTargetUnreachable: nasTargetUnreachable,
+      );
+
+  Future<SyncResult> syncWithRoots(
+    List<String> nasRootPaths, {
+    SyncCancellationToken? cancellationToken,
+  }) {
+    if (cancellationToken?.isCancelled ?? false) {
+      return Future<SyncResult>.value(_cancelledResult());
+    }
     return _enqueue(() async {
+      if (cancellationToken?.isCancelled ?? false) {
+        return _cancelledResult();
+      }
+      var hasConfiguredRoots = false;
       for (final root in nasRootPaths) {
+        if (cancellationToken?.isCancelled ?? false) {
+          return _cancelledResult(nasTargetUnreachable: hasConfiguredRoots);
+        }
         final trimmed = root.trim();
-        if (trimmed.isNotEmpty && await Directory(trimmed).exists()) {
-          return _performSyncWithRetry(trimmed);
+        if (trimmed.isEmpty) continue;
+        hasConfiguredRoots = true;
+        if (await Directory(trimmed).exists()) {
+          return _performSyncWithRetry(
+            trimmed,
+            cancellationToken: cancellationToken,
+          );
         }
       }
-      return _performSyncWithRetry('');
+      return _performSyncWithRetry(
+        '',
+        nasTargetUnreachable: hasConfiguredRoots,
+        cancellationToken: cancellationToken,
+      );
     });
   }
 
-  Future<SyncResult> syncWithStorage(String nasRootPath) {
-    return _enqueue(() => _performSyncWithRetry(nasRootPath));
+  Future<SyncResult> syncWithStorage(
+    String nasRootPath, {
+    SyncCancellationToken? cancellationToken,
+  }) {
+    if (cancellationToken?.isCancelled ?? false) {
+      return Future<SyncResult>.value(_cancelledResult());
+    }
+    return _enqueue(
+      () => _performSyncWithRetry(
+        nasRootPath,
+        cancellationToken: cancellationToken,
+      ),
+    );
   }
 
-  Future<void> waitForIdle() {
-    return _enqueue(() async {});
-  }
+  Future<void> waitForIdle() => _enqueue(() async {});
 
   Future<SyncResult> recoverValidEntriesFromFile(String filePath) {
     return _enqueue(() async {
@@ -160,40 +204,72 @@ class ProgressSyncService {
     });
   }
 
-  Future<SyncResult> _performSyncWithRetry(String nasRootPath) async {
+  Future<SyncResult> _performSyncWithRetry(
+    String nasRootPath, {
+    bool nasTargetUnreachable = false,
+    SyncCancellationToken? cancellationToken,
+  }) async {
     SyncResult? lastConflict;
     for (var attempt = 0; attempt < _maxRetries; attempt++) {
-      final res = await _performSyncOnce(nasRootPath);
+      if (cancellationToken?.isCancelled ?? false) {
+        return _cancelledResult(nasTargetUnreachable: nasTargetUnreachable);
+      }
+      final res = await _performSyncOnce(
+        nasRootPath,
+        nasTargetUnreachable: nasTargetUnreachable,
+        cancellationToken: cancellationToken,
+      );
       if (res.status != SyncStatus.conflict) {
         return res;
       }
       lastConflict = res;
       await Future<void>.delayed(Duration(milliseconds: 20 * (attempt + 1)));
     }
+    if (cancellationToken?.isCancelled ?? false) {
+      return _cancelledResult(nasTargetUnreachable: nasTargetUnreachable);
+    }
     return lastConflict ??
-        const SyncResult(
+        SyncResult(
           syncedToNas: false,
           targetPath: '',
           status: SyncStatus.conflict,
           message: 'Sync-Lock konnte nicht erworben werden.',
+          nasTargetUnreachable: nasTargetUnreachable,
         );
   }
 
-  Future<SyncResult> _performSyncOnce(String nasRootPath) async {
+  Future<SyncResult> _performSyncOnce(
+    String nasRootPath, {
+    bool nasTargetUnreachable = false,
+    SyncCancellationToken? cancellationToken,
+  }) async {
+    if (cancellationToken?.isCancelled ?? false) {
+      return _cancelledResult(nasTargetUnreachable: nasTargetUnreachable);
+    }
     if (!_databaseService.isOpen) {
-      return const SyncResult(
+      return SyncResult(
         syncedToNas: false,
         targetPath: '',
         status: SyncStatus.failed,
         message: 'Datenbank nicht geöffnet.',
+        nasTargetUnreachable: nasTargetUnreachable,
       );
     }
     final target = await _resolveSyncTarget(nasRootPath);
+    final effectiveNasUnreachable = nasTargetUnreachable ||
+        (nasRootPath.trim().isNotEmpty && !target.isNas);
+    if (cancellationToken?.isCancelled ?? false) {
+      return _cancelledResult(
+        targetPath: target.path,
+        nasTargetUnreachable: effectiveNasUnreachable,
+      );
+    }
     if (!_databaseService.isOpen) {
       return SyncResult(
         syncedToNas: false,
         targetPath: target.path,
         status: SyncStatus.failed,
+        nasTargetUnreachable: effectiveNasUnreachable,
       );
     }
     final syncPath = target.path;
@@ -203,22 +279,38 @@ class ProgressSyncService {
       writerId: _writerId,
       staleTimeout: _lockStaleTimeout,
       acquireTimeout: _lockAcquireTimeout,
+      cancellationToken: cancellationToken,
     );
+    if (cancellationToken?.isCancelled ?? false) {
+      await lock?.release();
+      return _cancelledResult(
+        targetPath: syncPath,
+        nasTargetUnreachable: effectiveNasUnreachable,
+      );
+    }
     if (lock == null) {
       return SyncResult(
         syncedToNas: false,
         targetPath: syncPath,
         status: SyncStatus.conflict,
         message: 'Sync-Datei wird aktuell von einem anderen Gerät beschrieben.',
+        nasTargetUnreachable: effectiveNasUnreachable,
       );
     }
 
     try {
+      if (cancellationToken?.isCancelled ?? false) {
+        return _cancelledResult(
+          targetPath: syncPath,
+          nasTargetUnreachable: effectiveNasUnreachable,
+        );
+      }
       if (!_databaseService.isOpen) {
         return SyncResult(
           syncedToNas: false,
           targetPath: syncPath,
           status: SyncStatus.failed,
+          nasTargetUnreachable: effectiveNasUnreachable,
         );
       }
 
@@ -236,6 +328,13 @@ class ProgressSyncService {
             targetPath: syncPath,
             status: SyncStatus.failed,
             message: 'Sync-Datei konnte nicht gelesen werden: ${error.message}',
+            nasTargetUnreachable: effectiveNasUnreachable,
+          );
+        }
+        if (cancellationToken?.isCancelled ?? false) {
+          return _cancelledResult(
+            targetPath: syncPath,
+            nasTargetUnreachable: effectiveNasUnreachable,
           );
         }
 
@@ -253,17 +352,25 @@ class ProgressSyncService {
             message: parsed.errorMessage,
             corruptBackupPath: backupPath,
             validationIssues: parsed.issues,
+            nasTargetUnreachable: effectiveNasUnreachable,
           );
         }
         remoteDoc = parsed.document!;
         issues = parsed.issues;
       }
 
+      if (cancellationToken?.isCancelled ?? false) {
+        return _cancelledResult(
+          targetPath: syncPath,
+          nasTargetUnreachable: effectiveNasUnreachable,
+        );
+      }
       if (!_databaseService.isOpen) {
         return SyncResult(
           syncedToNas: false,
           targetPath: syncPath,
           status: SyncStatus.failed,
+          nasTargetUnreachable: effectiveNasUnreachable,
         );
       }
 
@@ -274,6 +381,12 @@ class ProgressSyncService {
           ? const <String, SyncEntry>{}
           : SyncMergeStore.remapEntries(remoteDoc.entries, v1ToV2);
       final localEntries = SyncMergeStore.loadLocalEntries(db);
+      if (cancellationToken?.isCancelled ?? false) {
+        return _cancelledResult(
+          targetPath: syncPath,
+          nasTargetUnreachable: effectiveNasUnreachable,
+        );
+      }
       final mergedEntries = SyncMergeStore.mergeAndPersistToDb(
         db,
         localEntries,
@@ -281,9 +394,10 @@ class ProgressSyncService {
       );
 
       final nextGeneration = (remoteDoc?.generation ?? 0) + 1;
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
       final payloadJson = jsonEncode({
         'version': SyncSchema.currentVersion,
-        'updated_at': DateTime.now().millisecondsSinceEpoch,
+        'updated_at': nowMs,
         'generation': nextGeneration,
         'writer_id': _writerId,
         'entries': {
@@ -291,6 +405,13 @@ class ProgressSyncService {
             entry.key: entry.value.toJson(),
         },
       });
+
+      if (cancellationToken?.isCancelled ?? false) {
+        return _cancelledResult(
+          targetPath: syncPath,
+          nasTargetUnreachable: effectiveNasUnreachable,
+        );
+      }
 
       String? writeError;
       try {
@@ -313,6 +434,7 @@ class ProgressSyncService {
           validationIssues: issues,
           generation: remoteDoc?.generation ?? 0,
           mergedEntryCount: mergedEntries.length,
+          nasTargetUnreachable: effectiveNasUnreachable,
         );
       }
 
@@ -324,6 +446,8 @@ class ProgressSyncService {
         validationIssues: issues,
         generation: nextGeneration,
         mergedEntryCount: mergedEntries.length,
+        nasTargetUnreachable: effectiveNasUnreachable,
+        completedAtMs: nowMs,
       );
     } finally {
       await lock.release();

@@ -83,6 +83,7 @@ enum PlayerActionOsdKind {
   chapter,
   introSkip,
   subtitle,
+  error,
 }
 
 class PlayerWindowAdapter {

@@ -54,6 +54,9 @@ void main() {
           'idx_watch_progress_completed_updated',
           'idx_episodes_thumb_queue',
           'idx_movies_thumb_queue',
+          'idx_series_source_id',
+          'idx_episodes_source_id',
+          'idx_movies_source_id',
         ]),
       );
 
@@ -61,7 +64,7 @@ void main() {
       expect(fk, 1);
 
       final version = db.select('PRAGMA user_version;').first.values.first;
-      expect(version, 6);
+      expect(version, DatabaseService.schemaVersion);
 
       final epCols = db
           .select('PRAGMA table_info(episodes);')
@@ -76,6 +79,7 @@ void main() {
           'thumb_attempts',
           'thumb_last_error',
           'thumb_retry_at',
+          'source_id',
         ]),
       );
 
@@ -92,6 +96,23 @@ void main() {
           'thumb_attempts',
           'thumb_last_error',
           'thumb_retry_at',
+          'source_id',
+        ]),
+      );
+
+      final prefCols = db
+          .select('PRAGMA table_info(series_preferences);')
+          .map((r) => r['name'] as String)
+          .toSet();
+      expect(
+        prefCols,
+        containsAll([
+          'series_id',
+          'audio_track',
+          'subtitle_track',
+          'intro_skip_seconds',
+          'audio_pref_json',
+          'subtitle_pref_json',
         ]),
       );
     });

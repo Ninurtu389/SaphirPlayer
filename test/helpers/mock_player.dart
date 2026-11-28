@@ -80,6 +80,8 @@ class FakePlayerHarness {
 
   bool throwOnOpen = false;
   Object? openError;
+  Object? setAudioTrackError;
+  Object? setSubtitleTrackError;
   bool _currentPlaying = false;
   double _currentVolume = 100.0;
   Uint8List? screenshotBytes = Uint8List.fromList([0x89, 0x50, 0x4E, 0x47]);
@@ -198,10 +200,16 @@ class FakePlayerHarness {
       rates.add(rate);
     });
     when(() => player.setAudioTrack(any())).thenAnswer((invocation) async {
+      if (setAudioTrackError != null) {
+        throw setAudioTrackError!;
+      }
       final track = invocation.positionalArguments.first as AudioTrack;
       selectedAudioTracks.add(track);
     });
     when(() => player.setSubtitleTrack(any())).thenAnswer((invocation) async {
+      if (setSubtitleTrackError != null) {
+        throw setSubtitleTrackError!;
+      }
       final track = invocation.positionalArguments.first as SubtitleTrack;
       selectedSubtitleTracks.add(track);
     });

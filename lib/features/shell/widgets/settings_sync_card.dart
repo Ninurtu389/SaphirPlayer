@@ -43,7 +43,7 @@ class SettingsSyncCard extends StatelessWidget {
           _ActionRowTile(
             icon: Icons.sync,
             title: AppStrings.settingsSyncActionTitle,
-            subtitle: AppStrings.settingsSyncActionDesc,
+            subtitle: _syncSubtitle(),
             action: OutlinedButton.icon(
               onPressed: busy ? null : onSyncNow,
               icon: const Icon(Icons.sync, size: AppSpacing.iconSizeMd),
@@ -102,6 +102,19 @@ class SettingsSyncCard extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  String _syncSubtitle() {
+    final parts = <String>[AppStrings.settingsSyncActionDesc];
+    final lastFeedback = settingsController.lastSyncFeedback;
+    if (lastFeedback != null) {
+      final line = lastFeedback.detail != null
+          ? '${lastFeedback.headline} (${lastFeedback.detail})'
+          : lastFeedback.headline;
+      parts.add(line);
+    }
+    parts.add(settingsController.formattedLastSuccessfulSync);
+    return parts.join('\n');
   }
 
   String _cacheSubtitle() {

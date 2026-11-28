@@ -118,6 +118,7 @@ class AppStrings {
   static const String playerAudioTrackTooltip = 'Tonspur';
   static const String playerSubtitleTrackTooltip = 'Untertitel';
   static const String playerSubtitleOffLabel = 'Aus';
+  static const String playerTrackAutoLabel = 'Automatisch';
   static const String playerTrackPrefix = 'Spur';
   static const String playerSubtitleTrackPrefix = 'Untertitel';
   static const String playerSpeedTooltip = 'Wiedergabegeschwindigkeit';
@@ -162,7 +163,72 @@ class AppStrings {
   static const String thumbQueueReadyLabel = 'fertig';
   static const String thumbQueueFailedLabel = 'fehlgeschlagen';
   static const String syncNowButton = 'Sync abgleichen';
-  static const String syncCompletedStatus = 'Fortschritt synchronisiert';
+  static const String syncNasCompletedStatus =
+      'Fortschritt auf dem NAS synchronisiert';
+  static const String syncLocalFallbackStatus =
+      'Lokal gesichert – nicht auf NAS abgeglichen (kein NAS-Ordner aktiv)';
+  static const String syncNasUnreachableStatus =
+      'NAS nicht erreichbar – nur lokal gespeichert, nicht auf NAS abgeglichen';
+  static const String syncConflictStatus =
+      'Sync-Konflikt – Datei wird aktuell von einem anderen Gerät beschrieben';
+  static const String syncCorruptStatus =
+      'Sync-Datei beschädigt – Original unverändert und gesichert';
+  static const String syncIncompatibleVersionStatus =
+      'Sync-Datei hat eine neuere Formatversion – nicht überschrieben';
+  static const String syncFailedStatus =
+      'Synchronisation fehlgeschlagen – Diagnose-Log prüfen';
+  static const String syncCancelledStatus =
+      'Synchronisation beim Beenden abgebrochen – wird beim nächsten Start nachgeholt';
+  static const String settingsLoadErrorStatus =
+      'Einstellungen konnten nicht vollständig geladen werden – Standardwerte aktiv';
+  static const String settingsFieldFallbackWarning =
+      'Einzelne beschädigte Einstellungswerte wurden auf Standard zurückgesetzt';
+  static const String startupSyncRetryButton = 'Sync wiederholen';
+  static const String syncLastNasPrefix = 'Letzter NAS-Abgleich:';
+  static const String syncLastNasNoneLabel = 'Noch kein NAS-Abgleich';
+  static const String syncTargetPathPrefix = 'Ziel:';
+
+  static const String scanFailedStatus =
+      'Scan fehlgeschlagen – bitte Diagnose prüfen oder erneut versuchen';
+  static const String scanUnreachableSourcesStatus =
+      'Einzelne Medienquellen nicht erreichbar – lokaler Index erhalten';
+  static const String scanIdentityConflictStatus =
+      'Doppelte Medien-Identitäten erkannt – Konflikte übersprungen';
+  static const String scanRetryButton = 'Erneut versuchen';
+  static const String scanSyncWarningPrefix = 'Sync-Hinweis:';
+  static const String scanPhaseEnumerating = 'Ordner werden eingelesen...';
+  static const String scanPhaseReadingMetadata =
+      'Medien-Metadaten werden gelesen...';
+  static const String scanPhaseApplyingDiff =
+      'Bibliotheksindex wird aktualisiert...';
+  static const String scanPhaseGeneratingThumbnails =
+      'Vorschaubilder werden erstellt...';
+
+  static const String sourceStatusActive = 'Aktiv';
+  static const String sourceStatusComplete = 'Erreichbar';
+  static const String sourceStatusPartial = 'Teilweise lesbar';
+  static const String sourceStatusUnreachable = 'Nicht erreichbar';
+  static const String sourceStatusCancelled = 'Abgebrochen';
+  static const String sourceStatusFailed = 'Fehler';
+  static const String sourceStatusDisabled = 'Deaktiviert';
+  static const String sourceLastSuccessPrefix = 'Letzter Scan:';
+  static const String sourceNeverScannedLabel = 'Noch nicht gescannt';
+  static const String sourceRescanTooltip = 'Quelle erneut scannen';
+  static const String sourceReactivateTooltip = 'Quelle wiederaktivieren';
+  static const String sourceDisabledStatus =
+      'Medienquelle deaktiviert – lokale Daten bleiben erhalten';
+  static const String sourceRemovedWithIndexStatus =
+      'Medienquelle und lokaler Index entfernt';
+  static const String sourceReactivatedStatus = 'Medienquelle wiederaktiviert';
+  static const String sourceRemoveDialogTitle = 'Medienquelle entfernen';
+  static const String sourceRemoveDialogMessage =
+      'Möchtest du diese Quelle nur deaktivieren (Index, Verlauf und Lesezeichen bleiben beim Wiederaktivieren erhalten) oder den lokalen Bibliotheksindex dieser Quelle entfernen? Fortschritt, Verlauf und Lesezeichen bleiben für Statistiken erhalten.';
+  static const String sourceDisableKeepDataAction =
+      'Nur deaktivieren (Daten behalten)';
+  static const String sourceRemoveWithIndexAction = 'Quelle & Index entfernen';
+  static const String sourceFilesLabel = 'Dateien';
+  static const String sourceMediaLabel = 'Medien';
+  static const String sourceErrorsLabel = 'Fehler';
   static const String pickFolderDialogTitle = 'Medienordner auswählen';
   static const String backupSectionTitle = 'Datenbank-Sicherung';
   static const String backupCreateButton = 'Backup erstellen';
@@ -325,6 +391,12 @@ class AppStrings {
   static const String osdFrameStepForward = 'Einzelbild vor';
   static const String osdFrameStepBack = 'Einzelbild zurück';
   static const String osdExternalSubLoaded = 'Untertitel geladen';
+  static const String playerAudioTrackSwitchFailedOsd =
+      'Tonspur konnte nicht gewechselt werden';
+  static const String playerSubtitleTrackSwitchFailedOsd =
+      'Untertitel konnten nicht gewechselt werden';
+  static const String playerExternalSubFailedOsd =
+      'Externe Untertitel konnten nicht geladen werden';
   static const String osdSleepTimerSetPrefix = 'Sleep-Timer:';
   static const String osdSleepTimerOff = 'Sleep-Timer aus';
 

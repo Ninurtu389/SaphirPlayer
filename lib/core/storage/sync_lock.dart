@@ -42,7 +42,11 @@ class SyncFileLock {
     required String writerId,
     Duration staleTimeout = SyncSchema.defaultLockStaleTimeout,
     Duration acquireTimeout = SyncSchema.defaultLockAcquireTimeout,
+    SyncCancellationToken? cancellationToken,
   }) async {
+    if (cancellationToken?.isCancelled ?? false) {
+      return null;
+    }
     final parentDir = Directory(p.dirname(syncPath));
     if (!await parentDir.exists()) {
       await parentDir.create(recursive: true);
@@ -50,29 +54,45 @@ class SyncFileLock {
 
     final lockDir = Directory('$syncPath.lock.d');
     final ownerFile = File(p.join(lockDir.path, 'owner.json'));
-    final ownerTmpFile = File(p.join(lockDir.path, 'owner.json.tmp'));
     final deadline = DateTime.now().add(acquireTimeout);
 
     while (true) {
+      if (cancellationToken?.isCancelled ?? false) {
+        return null;
+      }
       try {
-        await lockDir.create(recursive: false);
-        final now = DateTime.now().millisecondsSinceEpoch;
-        await ownerTmpFile.writeAsString(
-          jsonEncode({
-            'writer_id': writerId,
-            'pid': pid,
-            'acquired_at': now,
-            'expires_at': now + staleTimeout.inMilliseconds,
-          }),
-          flush: true,
-        );
-        await ownerTmpFile.rename(ownerFile.path);
+        await lockDir.create(recursive: true);
+        await ownerFile.create(exclusive: true);
+        try {
+          final now = DateTime.now().millisecondsSinceEpoch;
+          await ownerFile.writeAsString(
+            jsonEncode({
+              'writer_id': writerId,
+              'pid': pid,
+              'acquired_at': now,
+              'expires_at': now + staleTimeout.inMilliseconds,
+            }),
+            flush: true,
+          );
+        } catch (_) {
+          try {
+            if (await ownerFile.exists()) {
+              await ownerFile.delete();
+            }
+          } on FileSystemException {
+            // Best-effort Cleanup bei abgebrochener Lock-Erstellung
+          }
+          rethrow;
+        }
         return SyncLockHandle(
           lockDir: lockDir,
           ownerFile: ownerFile,
           writerId: writerId,
         );
       } on FileSystemException {
+        if (cancellationToken?.isCancelled ?? false) {
+          return null;
+        }
         if (await _isStaleLock(lockDir, ownerFile, staleTimeout)) {
           try {
             if (await lockDir.exists()) {
@@ -83,7 +103,8 @@ class SyncFileLock {
           }
           continue;
         }
-        if (DateTime.now().isAfter(deadline)) {
+        if (DateTime.now().isAfter(deadline) ||
+            (cancellationToken?.isCancelled ?? false)) {
           return null;
         }
         await Future<void>.delayed(const Duration(milliseconds: 25));

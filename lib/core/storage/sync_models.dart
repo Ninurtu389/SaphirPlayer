@@ -22,7 +22,33 @@ enum SyncStatus {
   conflict,
   corrupt,
   incompatibleVersion,
+  cancelled,
   failed,
+}
+
+class SyncCancellationToken {
+  bool _isCancelled = false;
+  final List<void Function()> _listeners = <void Function()>[];
+
+  bool get isCancelled => _isCancelled;
+
+  void addListener(void Function() listener) {
+    if (!_listeners.contains(listener)) {
+      _listeners.add(listener);
+    }
+  }
+
+  void removeListener(void Function() listener) {
+    _listeners.remove(listener);
+  }
+
+  void cancel() {
+    if (_isCancelled) return;
+    _isCancelled = true;
+    for (final listener in List<void Function()>.of(_listeners)) {
+      listener();
+    }
+  }
 }
 
 class SyncValidationIssue {
@@ -149,6 +175,8 @@ class SyncResult {
     this.validationIssues = const [],
     this.generation = 0,
     this.mergedEntryCount = 0,
+    this.nasTargetUnreachable = false,
+    this.completedAtMs,
   });
 
   final bool syncedToNas;
@@ -160,4 +188,6 @@ class SyncResult {
   final List<SyncValidationIssue> validationIssues;
   final int generation;
   final int mergedEntryCount;
+  final bool nasTargetUnreachable;
+  final int? completedAtMs;
 }

@@ -130,7 +130,9 @@ void main() {
       // Enter folder path and submit
       await tester.enterText(
         find.byWidgetPredicate(
-          (w) => w is TextField && w.decoration?.labelText == AppStrings.nasPathLabel,
+          (w) =>
+              w is TextField &&
+              w.decoration?.labelText == AppStrings.nasPathLabel,
         ),
         r'D:\TestMedien',
       );
@@ -143,8 +145,20 @@ void main() {
       await tester.pumpAndSettle();
       expect(settingsController.effectMode, EffectMode.lean);
 
-      // Remove folder
+      // Remove folder via A10 confirmation dialog
       await tester.tap(find.byTooltip(AppStrings.removeFolderTooltip));
+      await tester.pumpAndSettle();
+      expect(find.text(AppStrings.sourceRemoveDialogTitle), findsOneWidget);
+      await tester.tap(find.text(AppStrings.sourceRemoveWithIndexAction));
+      await tester.pump();
+      for (var i = 0;
+          i < 60 && settingsController.mediaSources.isNotEmpty;
+          i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 25)),
+        );
+        await tester.pump();
+      }
       await tester.pumpAndSettle();
       expect(find.text(AppStrings.noFoldersConfigured), findsOneWidget);
 
@@ -193,7 +207,8 @@ void main() {
       // Type in global search bar
       await tester.enterText(
         find.byWidgetPredicate(
-          (w) => w is TextField && w.decoration?.hintText == AppStrings.searchHint,
+          (w) =>
+              w is TextField && w.decoration?.hintText == AppStrings.searchHint,
         ),
         'Interstellar',
       );

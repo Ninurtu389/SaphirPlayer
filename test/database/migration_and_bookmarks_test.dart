@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
@@ -116,7 +117,8 @@ void main() {
       addTearDown(service.close);
 
       final db = service.instance;
-      expect(db.select('PRAGMA user_version;').first.values.first, 6);
+      expect(db.select('PRAGMA user_version;').first.values.first,
+          DatabaseService.schemaVersion);
 
       final cols = db
           .select('PRAGMA table_info(series_preferences);')
@@ -165,7 +167,7 @@ void main() {
       await service.open(dbPath: v1Path);
       expect(
         service.instance.select('PRAGMA user_version;').first.values.first,
-        6,
+        DatabaseService.schemaVersion,
       );
     });
 
@@ -261,7 +263,8 @@ void main() {
         addTearDown(service.close);
 
         final db = service.instance;
-        expect(db.select('PRAGMA user_version;').first.values.first, 6);
+        expect(db.select('PRAGMA user_version;').first.values.first,
+            DatabaseService.schemaVersion);
         final movieCols = db
             .select('PRAGMA table_info(movies);')
             .map((r) => r['name'] as String)
@@ -394,7 +397,8 @@ void main() {
       addTearDown(service.close);
 
       final db = service.instance;
-      expect(db.select('PRAGMA user_version;').first.values.first, 6);
+      expect(db.select('PRAGMA user_version;').first.values.first,
+          DatabaseService.schemaVersion);
 
       final epCols = db
           .select('PRAGMA table_info(episodes);')
@@ -452,7 +456,7 @@ void main() {
       service.close();
       await service.open(dbPath: v3Path);
       expect(service.instance.select('PRAGMA user_version;').first.values.first,
-          6);
+          DatabaseService.schemaVersion);
     });
 
     test(
@@ -523,7 +527,8 @@ void main() {
       addTearDown(service.close);
 
       final db = service.instance;
-      expect(db.select('PRAGMA user_version;').first.values.first, 6);
+      expect(db.select('PRAGMA user_version;').first.values.first,
+          DatabaseService.schemaVersion);
 
       final ep1 = db
           .select(
@@ -543,6 +548,165 @@ void main() {
       expect(ep2['thumb_attempts'], 0);
       expect(mv1['thumb_status'], 'retry_wait');
       expect(mv1['thumb_attempts'], 1);
+    });
+
+    test(
+        'migrates v6 schema to v7 backfilling source_id and adding source scan columns idempotently',
+        () async {
+      final env = await TestEnv.create();
+      addTearDown(env.dispose);
+
+      final v6Path = p.join(env.tempRoot.path, 'legacy_v6.db');
+      final raw = sqlite3.open(v6Path);
+      raw.execute('''
+        CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE media_sources (source_id TEXT PRIMARY KEY, root_path TEXT NOT NULL UNIQUE, label TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', created_at INTEGER NOT NULL);
+        CREATE TABLE series (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, folder_path TEXT NOT NULL UNIQUE, poster_path TEXT, summary TEXT, last_watched_at INTEGER);
+        CREATE TABLE seasons (id INTEGER PRIMARY KEY AUTOINCREMENT, series_id INTEGER NOT NULL, season_number INTEGER NOT NULL, folder_path TEXT NOT NULL);
+        CREATE TABLE episodes (id INTEGER PRIMARY KEY AUTOINCREMENT, series_id INTEGER NOT NULL, season_id INTEGER NOT NULL, episode_number INTEGER NOT NULL, title TEXT NOT NULL, file_path TEXT NOT NULL UNIQUE, duration_ms INTEGER NOT NULL DEFAULT 0, thumb_path TEXT, sync_key TEXT, thumb_status TEXT NOT NULL DEFAULT 'pending', thumb_attempts INTEGER NOT NULL DEFAULT 0, thumb_last_error TEXT, thumb_retry_at INTEGER NOT NULL DEFAULT 0, artist TEXT, file_size INTEGER NOT NULL DEFAULT 0, modified_at INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE movies (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, release_year INTEGER, file_path TEXT NOT NULL UNIQUE, poster_path TEXT, thumb_path TEXT, duration_ms INTEGER NOT NULL DEFAULT 0, last_watched_at INTEGER, sync_key TEXT, thumb_status TEXT NOT NULL DEFAULT 'pending', thumb_attempts INTEGER NOT NULL DEFAULT 0, thumb_last_error TEXT, thumb_retry_at INTEGER NOT NULL DEFAULT 0, artist TEXT, file_size INTEGER NOT NULL DEFAULT 0, modified_at INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE watch_progress (media_key TEXT PRIMARY KEY, media_type TEXT NOT NULL, position_ms INTEGER NOT NULL DEFAULT 0, duration_ms INTEGER NOT NULL DEFAULT 0, completed INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL, source_device TEXT NOT NULL);
+        CREATE TABLE series_preferences (series_id INTEGER PRIMARY KEY, audio_track TEXT, subtitle_track TEXT, intro_skip_seconds INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE watch_history (id INTEGER PRIMARY KEY AUTOINCREMENT, media_key TEXT NOT NULL, media_type TEXT NOT NULL, title TEXT NOT NULL, series_id INTEGER, watched_ms INTEGER NOT NULL DEFAULT 0, started_at INTEGER NOT NULL, ended_at INTEGER NOT NULL, day_key TEXT NOT NULL, weekday INTEGER NOT NULL, source_device TEXT NOT NULL);
+        CREATE TABLE media_bookmarks (id INTEGER PRIMARY KEY AUTOINCREMENT, media_key TEXT NOT NULL, position_ms INTEGER NOT NULL, label TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL);
+      ''');
+      raw.execute(
+        "INSERT INTO media_sources (source_id, root_path, label, status, created_at) VALUES ('nas_serien', 'D:\\NAS\\Serien', 'Serien', 'active', 1000);",
+      );
+      raw.execute(
+        "INSERT INTO series (id, title, folder_path) VALUES (1, 'Dark', 'D:\\NAS\\Serien\\Dark');",
+      );
+      raw.execute(
+        "INSERT INTO seasons (id, series_id, season_number, folder_path) VALUES (1, 1, 1, 'D:\\NAS\\Serien\\Dark\\S01');",
+      );
+      raw.execute(
+        "INSERT INTO episodes (id, series_id, season_id, episode_number, title, file_path) VALUES (1, 1, 1, 1, 'Ep1', 'D:\\NAS\\Serien\\Dark\\S01E01.mkv');",
+      );
+      raw.execute(
+        "INSERT INTO movies (id, title, file_path) VALUES (1, 'Unmatched', 'E:\\Other\\Movie.mkv');",
+      );
+      raw.execute('PRAGMA user_version = 6;');
+      raw.dispose();
+
+      final service = DatabaseService();
+      await service.open(dbPath: v6Path);
+      addTearDown(service.close);
+
+      final db = service.instance;
+      expect(
+        db.select('PRAGMA user_version;').first.values.first,
+        DatabaseService.schemaVersion,
+      );
+
+      final srcCols = db
+          .select('PRAGMA table_info(media_sources);')
+          .map((r) => r['name'] as String)
+          .toSet();
+      expect(
+        srcCols,
+        containsAll([
+          'last_scan_at',
+          'last_success_scan_at',
+          'last_scan_status',
+          'last_scan_error',
+          'last_files_examined',
+          'last_media_found',
+          'last_error_count',
+        ]),
+      );
+
+      final ep =
+          db.select('SELECT source_id FROM episodes WHERE id = 1;').first;
+      expect(ep['source_id'], 'nas_serien');
+
+      final mv = db.select('SELECT source_id FROM movies WHERE id = 1;').first;
+      expect(mv['source_id'], isNull);
+
+      service.close();
+      await service.open(dbPath: v6Path);
+      expect(
+        service.instance.select('PRAGMA user_version;').first.values.first,
+        DatabaseService.schemaVersion,
+      );
+    });
+
+    test(
+        'migrates v7 schema to v8 adding structured track preference columns and backfilling legacy IDs idempotently',
+        () async {
+      final env = await TestEnv.create();
+      addTearDown(env.dispose);
+
+      final v7Path = p.join(env.tempRoot.path, 'legacy_v7.db');
+      final raw = sqlite3.open(v7Path);
+      raw.execute('''
+        CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE media_sources (source_id TEXT PRIMARY KEY, root_path TEXT NOT NULL UNIQUE, label TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', created_at INTEGER NOT NULL, last_scan_at INTEGER, last_success_scan_at INTEGER, last_scan_status TEXT, last_scan_error TEXT, last_files_examined INTEGER NOT NULL DEFAULT 0, last_media_found INTEGER NOT NULL DEFAULT 0, last_error_count INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE series (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, folder_path TEXT NOT NULL UNIQUE, poster_path TEXT, summary TEXT, last_watched_at INTEGER, source_id TEXT);
+        CREATE TABLE seasons (id INTEGER PRIMARY KEY AUTOINCREMENT, series_id INTEGER NOT NULL, season_number INTEGER NOT NULL, folder_path TEXT NOT NULL);
+        CREATE TABLE episodes (id INTEGER PRIMARY KEY AUTOINCREMENT, series_id INTEGER NOT NULL, season_id INTEGER NOT NULL, episode_number INTEGER NOT NULL, title TEXT NOT NULL, file_path TEXT NOT NULL UNIQUE, duration_ms INTEGER NOT NULL DEFAULT 0, thumb_path TEXT, sync_key TEXT, thumb_status TEXT NOT NULL DEFAULT 'pending', thumb_attempts INTEGER NOT NULL DEFAULT 0, thumb_last_error TEXT, thumb_retry_at INTEGER NOT NULL DEFAULT 0, artist TEXT, file_size INTEGER NOT NULL DEFAULT 0, modified_at INTEGER NOT NULL DEFAULT 0, source_id TEXT);
+        CREATE TABLE movies (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, release_year INTEGER, file_path TEXT NOT NULL UNIQUE, poster_path TEXT, thumb_path TEXT, duration_ms INTEGER NOT NULL DEFAULT 0, last_watched_at INTEGER, sync_key TEXT, thumb_status TEXT NOT NULL DEFAULT 'pending', thumb_attempts INTEGER NOT NULL DEFAULT 0, thumb_last_error TEXT, thumb_retry_at INTEGER NOT NULL DEFAULT 0, artist TEXT, file_size INTEGER NOT NULL DEFAULT 0, modified_at INTEGER NOT NULL DEFAULT 0, source_id TEXT);
+        CREATE TABLE watch_progress (media_key TEXT PRIMARY KEY, media_type TEXT NOT NULL, position_ms INTEGER NOT NULL DEFAULT 0, duration_ms INTEGER NOT NULL DEFAULT 0, completed INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL, source_device TEXT NOT NULL);
+        CREATE TABLE series_preferences (series_id INTEGER PRIMARY KEY, audio_track TEXT, subtitle_track TEXT, intro_skip_seconds INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE watch_history (id INTEGER PRIMARY KEY AUTOINCREMENT, media_key TEXT NOT NULL, media_type TEXT NOT NULL, title TEXT NOT NULL, series_id INTEGER, watched_ms INTEGER NOT NULL DEFAULT 0, started_at INTEGER NOT NULL, ended_at INTEGER NOT NULL, day_key TEXT NOT NULL, weekday INTEGER NOT NULL, source_device TEXT NOT NULL);
+        CREATE TABLE media_bookmarks (id INTEGER PRIMARY KEY AUTOINCREMENT, media_key TEXT NOT NULL, position_ms INTEGER NOT NULL, label TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL);
+      ''');
+      raw.execute(
+        "INSERT INTO series (id, title, folder_path) VALUES (1, 'Dark', 'D:\\Dark'), (2, 'Andor', 'D:\\Andor');",
+      );
+      raw.execute(
+        "INSERT INTO series_preferences (series_id, audio_track, subtitle_track, intro_skip_seconds) VALUES (1, 'deu', 'no', 85), (2, 'auto', 'eng', 0);",
+      );
+      raw.execute('PRAGMA user_version = 7;');
+      raw.dispose();
+
+      final service = DatabaseService();
+      await service.open(dbPath: v7Path);
+      addTearDown(service.close);
+
+      final db = service.instance;
+      expect(
+        db.select('PRAGMA user_version;').first.values.first,
+        DatabaseService.schemaVersion,
+      );
+
+      final cols = db
+          .select('PRAGMA table_info(series_preferences);')
+          .map((r) => r['name'] as String)
+          .toSet();
+      expect(cols, containsAll(['audio_pref_json', 'subtitle_pref_json']));
+
+      final row1 = db
+          .select('SELECT * FROM series_preferences WHERE series_id = 1;')
+          .first;
+      expect(row1['audio_track'], 'deu');
+      expect(row1['subtitle_track'], 'no');
+      expect(row1['intro_skip_seconds'], 85);
+      final audioJson1 =
+          jsonDecode(row1['audio_pref_json'] as String) as Map<String, dynamic>;
+      expect(audioJson1['mode'], 'specific');
+      expect(audioJson1['language'], 'de');
+      expect(audioJson1['trackIdHint'], 'deu');
+      final subJson1 = jsonDecode(row1['subtitle_pref_json'] as String)
+          as Map<String, dynamic>;
+      expect(subJson1['mode'], 'off');
+
+      final row2 = db
+          .select('SELECT * FROM series_preferences WHERE series_id = 2;')
+          .first;
+      final audioJson2 =
+          jsonDecode(row2['audio_pref_json'] as String) as Map<String, dynamic>;
+      expect(audioJson2['mode'], 'auto');
+      final subJson2 = jsonDecode(row2['subtitle_pref_json'] as String)
+          as Map<String, dynamic>;
+      expect(subJson2['mode'], 'specific');
+      expect(subJson2['language'], 'en');
+
+      service.close();
+      await service.open(dbPath: v7Path);
+      expect(
+        service.instance.select('PRAGMA user_version;').first.values.first,
+        DatabaseService.schemaVersion,
+      );
     });
   });
 

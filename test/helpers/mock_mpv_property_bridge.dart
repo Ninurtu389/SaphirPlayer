@@ -14,6 +14,7 @@ class MockMpvPropertyBridge implements IMpvPropertyBridge {
   final List<VideoAspectMode> aspectModeHistory = [];
 
   List<PlayerChapter> chaptersToReturn = const [];
+  Future<List<PlayerChapter>> Function()? onReadChapters;
   PlayerDiagnostics diagnosticsToReturn = const PlayerDiagnostics(
     videoCodec: 'h264',
     audioCodec: 'aac',
@@ -21,6 +22,7 @@ class MockMpvPropertyBridge implements IMpvPropertyBridge {
     fps: '24.0',
     hwdec: 'd3d11va',
   );
+  Future<PlayerDiagnostics> Function()? onReadDiagnostics;
   int readDiagnosticsCount = 0;
 
   @override
@@ -105,11 +107,19 @@ class MockMpvPropertyBridge implements IMpvPropertyBridge {
   }
 
   @override
-  Future<List<PlayerChapter>> readChapters() async => chaptersToReturn;
+  Future<List<PlayerChapter>> readChapters() async {
+    if (onReadChapters != null) {
+      return onReadChapters!();
+    }
+    return chaptersToReturn;
+  }
 
   @override
   Future<PlayerDiagnostics> readDiagnostics() async {
     readDiagnosticsCount++;
+    if (onReadDiagnostics != null) {
+      return onReadDiagnostics!();
+    }
     return diagnosticsToReturn;
   }
 }

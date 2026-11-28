@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:path/path.dart' as p;
 import '../../core/constants/app_spacing.dart';
+import 'active_process_registry.dart';
 import 'thumbnail_cache_key.dart';
 
 /// Kapselt externe FFmpeg- und FFprobe-Prozesse für die Thumbnail-Erzeugung.
@@ -13,16 +14,11 @@ class ThumbnailFfmpegRunner {
   static String? _cachedFfmpegExe;
   static bool _ffprobeResolved = false;
   static String? _cachedFfprobeExe;
-  static final Set<Process> _activeProcesses = <Process>{};
 
-  static void killActiveProcesses() {
-    for (final process in _activeProcesses.toList()) {
-      try {
-        process.kill();
-      } catch (_) {}
-    }
-    _activeProcesses.clear();
-  }
+  static void killActiveProcesses() => ActiveProcessRegistry.killAllImmediate();
+
+  static Future<int> terminateActiveProcesses() =>
+      ActiveProcessRegistry.terminateAll();
 
   static void resetExecutableCache() {
     _ffmpegResolved = false;
@@ -61,9 +57,9 @@ class ThumbnailFfmpegRunner {
         ],
         runInShell: false,
       );
-      _activeProcesses.add(process);
-      unawaited(process.stdout.drain<void>());
-      unawaited(process.stderr.drain<void>());
+      ActiveProcessRegistry.register(process);
+      unawaited(process.stdout.drain<void>().catchError((_) {}));
+      unawaited(process.stderr.drain<void>().catchError((_) {}));
 
       final exitCode = await process.exitCode.timeout(
         const Duration(seconds: AppSpacing.ffmpegTimeoutSeconds),
@@ -83,7 +79,7 @@ class ThumbnailFfmpegRunner {
     } on ProcessException {
       return false;
     } finally {
-      if (process != null) _activeProcesses.remove(process);
+      if (process != null) ActiveProcessRegistry.unregister(process);
     }
   }
 
@@ -106,9 +102,10 @@ class ThumbnailFfmpegRunner {
         ],
         runInShell: false,
       );
-      _activeProcesses.add(process);
-      final stdoutFuture = process.stdout.transform(utf8.decoder).join();
-      unawaited(process.stderr.drain<void>());
+      ActiveProcessRegistry.register(process);
+      final stdoutFuture =
+          process.stdout.transform(utf8.decoder).join().catchError((_) => '');
+      unawaited(process.stderr.drain<void>().catchError((_) {}));
       final exitCode = await process.exitCode.timeout(
         const Duration(seconds: AppSpacing.ffmpegTimeoutSeconds),
       );
@@ -124,7 +121,7 @@ class ThumbnailFfmpegRunner {
     } on ProcessException {
       return null;
     } finally {
-      if (process != null) _activeProcesses.remove(process);
+      if (process != null) ActiveProcessRegistry.unregister(process);
     }
   }
 
@@ -167,8 +164,9 @@ class ThumbnailFfmpegRunner {
         const ['-version'],
         runInShell: false,
       );
-      unawaited(process.stdout.drain<void>());
-      unawaited(process.stderr.drain<void>());
+      ActiveProcessRegistry.register(process);
+      unawaited(process.stdout.drain<void>().catchError((_) {}));
+      unawaited(process.stderr.drain<void>().catchError((_) {}));
       final code = await process.exitCode.timeout(const Duration(seconds: 2));
       return code == 0 ? command : null;
     } on TimeoutException {
@@ -176,6 +174,8 @@ class ThumbnailFfmpegRunner {
       return null;
     } on ProcessException {
       return null;
+    } finally {
+      if (process != null) ActiveProcessRegistry.unregister(process);
     }
   }
 }

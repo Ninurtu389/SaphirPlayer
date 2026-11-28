@@ -36,6 +36,10 @@ class AppColors {
   static const Color dangerTileBorder = Color(0x4DE05252);
   static const Color successBannerFill = Color(0x1A25B869);
   static const Color successBannerBorder = Color(0x4D25B869);
+  static const Color warningBannerFill = Color(0x1AE5A11D);
+  static const Color warningBannerBorder = Color(0x4DE5A11D);
+  static const Color infoBannerFill = Color(0x1A4B9BFF);
+  static const Color infoBannerBorder = Color(0x4D4B9BFF);
 
   static const LinearGradient heroVerticalFadeGradient = LinearGradient(
     begin: Alignment.topCenter,

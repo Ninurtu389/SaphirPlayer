@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
+import '../../features/player/track_preference_models.dart';
 import 'sync_key_utils.dart';
 
 class DatabaseMigrations {
@@ -174,6 +175,164 @@ class DatabaseMigrations {
       db.execute(
         "UPDATE movies SET thumb_status = 'pending' WHERE thumb_status = 'processing';",
       );
+    }
+
+    if (fromVersion < 7) {
+      db.execute('BEGIN TRANSACTION;');
+      try {
+        _ensureColumn(db, 'media_sources', 'last_scan_at', 'INTEGER');
+        _ensureColumn(db, 'media_sources', 'last_success_scan_at', 'INTEGER');
+        _ensureColumn(db, 'media_sources', 'last_scan_status', 'TEXT');
+        _ensureColumn(db, 'media_sources', 'last_scan_error', 'TEXT');
+        _ensureColumn(
+          db,
+          'media_sources',
+          'last_files_examined',
+          'INTEGER NOT NULL DEFAULT 0',
+        );
+        _ensureColumn(
+          db,
+          'media_sources',
+          'last_media_found',
+          'INTEGER NOT NULL DEFAULT 0',
+        );
+        _ensureColumn(
+          db,
+          'media_sources',
+          'last_error_count',
+          'INTEGER NOT NULL DEFAULT 0',
+        );
+
+        _ensureColumn(db, 'series', 'source_id', 'TEXT');
+        _ensureColumn(db, 'episodes', 'source_id', 'TEXT');
+        _ensureColumn(db, 'movies', 'source_id', 'TEXT');
+
+        _backfillSourceIds(db);
+
+        db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_series_source_id ON series(source_id);',
+        );
+        db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_episodes_source_id ON episodes(source_id);',
+        );
+        db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_movies_source_id ON movies(source_id);',
+        );
+        db.execute('COMMIT;');
+      } catch (_) {
+        db.execute('ROLLBACK;');
+        rethrow;
+      }
+    }
+
+    if (fromVersion < 8) {
+      db.execute('BEGIN TRANSACTION;');
+      try {
+        _ensureColumn(db, 'series_preferences', 'audio_pref_json', 'TEXT');
+        _ensureColumn(db, 'series_preferences', 'subtitle_pref_json', 'TEXT');
+        _backfillSeriesTrackPreferences(db);
+        db.execute('COMMIT;');
+      } catch (_) {
+        db.execute('ROLLBACK;');
+        rethrow;
+      }
+    }
+  }
+
+  static void _backfillSeriesTrackPreferences(Database db) {
+    final rows = db.select(
+      '''
+      SELECT series_id, audio_track, subtitle_track, audio_pref_json, subtitle_pref_json
+      FROM series_preferences;
+      ''',
+    );
+    for (final row in rows) {
+      final seriesId = row['series_id'] as int;
+      final existingAudioJson = row['audio_pref_json'] as String?;
+      final existingSubJson = row['subtitle_pref_json'] as String?;
+
+      var nextAudioJson = existingAudioJson;
+      if (nextAudioJson == null || nextAudioJson.trim().isEmpty) {
+        final audioPref = TrackPreferenceDescriptor.tryFromLegacyTrackId(
+          row['audio_track'] as String?,
+        );
+        if (audioPref != null) {
+          nextAudioJson = audioPref.toJsonString();
+        }
+      }
+
+      var nextSubJson = existingSubJson;
+      if (nextSubJson == null || nextSubJson.trim().isEmpty) {
+        final subPref = TrackPreferenceDescriptor.tryFromLegacyTrackId(
+          row['subtitle_track'] as String?,
+        );
+        if (subPref != null) {
+          nextSubJson = subPref.toJsonString();
+        }
+      }
+
+      if (nextAudioJson != existingAudioJson ||
+          nextSubJson != existingSubJson) {
+        db.execute(
+          '''
+          UPDATE series_preferences
+          SET audio_pref_json = ?, subtitle_pref_json = ?
+          WHERE series_id = ?;
+          ''',
+          [nextAudioJson, nextSubJson, seriesId],
+        );
+      }
+    }
+  }
+
+  static void _backfillSourceIds(Database db) {
+    final sourceRows = db.select(
+      'SELECT source_id, root_path FROM media_sources ORDER BY LENGTH(root_path) DESC;',
+    );
+    if (sourceRows.isEmpty) return;
+
+    final sources = [
+      for (final row in sourceRows)
+        (
+          sourceId: row['source_id'] as String,
+          normRoot: SyncKeyUtils.normalizeRootPath(row['root_path'] as String),
+        ),
+    ];
+
+    String? matchSource(String pathValue) {
+      final normPath = SyncKeyUtils.normalizeRootPath(pathValue);
+      String? bestId;
+      var bestLen = -1;
+      for (final src in sources) {
+        if (src.normRoot.isEmpty) continue;
+        if (normPath == src.normRoot ||
+            normPath.startsWith('${src.normRoot}/')) {
+          if (src.normRoot.length > bestLen) {
+            bestLen = src.normRoot.length;
+            bestId = src.sourceId;
+          }
+        }
+      }
+      return bestId;
+    }
+
+    for (final spec in const [
+      (table: 'series', col: 'folder_path'),
+      (table: 'episodes', col: 'file_path'),
+      (table: 'movies', col: 'file_path'),
+    ]) {
+      final rows = db.select(
+        'SELECT id, ${spec.col} FROM ${spec.table} WHERE source_id IS NULL;',
+      );
+      for (final row in rows) {
+        final matched = matchSource(row[spec.col] as String);
+        if (matched != null) {
+          db.execute(
+            'UPDATE ${spec.table} SET source_id = ? WHERE id = ?;',
+            [matched, row['id'] as int],
+          );
+        }
+      }
     }
   }
 

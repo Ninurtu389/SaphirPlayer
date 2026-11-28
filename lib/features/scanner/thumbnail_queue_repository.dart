@@ -131,7 +131,13 @@ class ThumbnailQueueRepository {
     final counts = <String, int>{};
     for (final table in const ['episodes', 'movies']) {
       final rows = db.select(
-        'SELECT thumb_status, COUNT(*) AS c FROM $table GROUP BY thumb_status;',
+        '''
+        SELECT t.thumb_status, COUNT(*) AS c
+        FROM $table t
+        LEFT JOIN media_sources ms ON ms.source_id = t.source_id
+        WHERE (ms.status IS NULL OR ms.status = 'active')
+        GROUP BY t.thumb_status;
+        ''',
       );
       for (final row in rows) {
         final status =
@@ -169,10 +175,12 @@ class ThumbnailQueueRepository {
     for (final table in const ['episodes', 'movies']) {
       final count = db.select(
         '''
-        SELECT COUNT(*) AS c FROM $table
-        WHERE thumb_status IN ('pending', 'retry_wait')
-          AND (thumb_path IS NULL OR thumb_path = '')
-          AND thumb_retry_at <= ?;
+        SELECT COUNT(*) AS c FROM $table t
+        LEFT JOIN media_sources ms ON ms.source_id = t.source_id
+        WHERE (ms.status IS NULL OR ms.status = 'active')
+          AND t.thumb_status IN ('pending', 'retry_wait')
+          AND (t.thumb_path IS NULL OR t.thumb_path = '')
+          AND t.thumb_retry_at <= ?;
         ''',
         [nowMs],
       ).first['c'] as int;
@@ -346,14 +354,16 @@ class ThumbnailQueueRepository {
   ) {
     return db.select(
       '''
-      SELECT id, file_path, duration_ms, file_size, modified_at,
-             thumb_status, thumb_attempts, thumb_retry_at, thumb_last_error
-      FROM $table
-      WHERE thumb_status IN ('pending', 'retry_wait')
-        AND (thumb_path IS NULL OR thumb_path = '')
-        AND thumb_retry_at <= ?
-      ORDER BY CASE WHEN thumb_status = 'pending' THEN 0 ELSE 1 END,
-               thumb_retry_at ASC, id ASC
+      SELECT t.id, t.file_path, t.duration_ms, t.file_size, t.modified_at,
+             t.thumb_status, t.thumb_attempts, t.thumb_retry_at, t.thumb_last_error
+      FROM $table t
+      LEFT JOIN media_sources ms ON ms.source_id = t.source_id
+      WHERE (ms.status IS NULL OR ms.status = 'active')
+        AND t.thumb_status IN ('pending', 'retry_wait')
+        AND (t.thumb_path IS NULL OR t.thumb_path = '')
+        AND t.thumb_retry_at <= ?
+      ORDER BY CASE WHEN t.thumb_status = 'pending' THEN 0 ELSE 1 END,
+               t.thumb_retry_at ASC, t.id ASC
       LIMIT ?;
       ''',
       [nowMs, limit],

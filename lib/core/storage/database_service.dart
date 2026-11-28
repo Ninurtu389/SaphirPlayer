@@ -9,7 +9,7 @@ class DatabaseService {
   DatabaseService({StorageLayout? storageLayout})
       : _storageLayout = storageLayout;
 
-  static const int schemaVersion = 6;
+  static const int schemaVersion = 8;
 
   final StorageLayout? _storageLayout;
   Database? _db;
@@ -101,7 +101,14 @@ class DatabaseService {
         root_path TEXT NOT NULL UNIQUE,
         label TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'active',
-        created_at INTEGER NOT NULL
+        created_at INTEGER NOT NULL,
+        last_scan_at INTEGER,
+        last_success_scan_at INTEGER,
+        last_scan_status TEXT,
+        last_scan_error TEXT,
+        last_files_examined INTEGER NOT NULL DEFAULT 0,
+        last_media_found INTEGER NOT NULL DEFAULT 0,
+        last_error_count INTEGER NOT NULL DEFAULT 0
       );
     ''');
 
@@ -112,7 +119,8 @@ class DatabaseService {
         folder_path TEXT NOT NULL UNIQUE,
         poster_path TEXT,
         summary TEXT,
-        last_watched_at INTEGER
+        last_watched_at INTEGER,
+        source_id TEXT
       );
     ''');
 
@@ -145,6 +153,7 @@ class DatabaseService {
         artist TEXT,
         file_size INTEGER NOT NULL DEFAULT 0,
         modified_at INTEGER NOT NULL DEFAULT 0,
+        source_id TEXT,
         FOREIGN KEY (series_id) REFERENCES series(id) ON DELETE CASCADE,
         FOREIGN KEY (season_id) REFERENCES seasons(id) ON DELETE CASCADE
       );
@@ -167,7 +176,8 @@ class DatabaseService {
         thumb_retry_at INTEGER NOT NULL DEFAULT 0,
         artist TEXT,
         file_size INTEGER NOT NULL DEFAULT 0,
-        modified_at INTEGER NOT NULL DEFAULT 0
+        modified_at INTEGER NOT NULL DEFAULT 0,
+        source_id TEXT
       );
     ''');
 
@@ -189,6 +199,8 @@ class DatabaseService {
         audio_track TEXT,
         subtitle_track TEXT,
         intro_skip_seconds INTEGER NOT NULL DEFAULT 0,
+        audio_pref_json TEXT,
+        subtitle_pref_json TEXT,
         FOREIGN KEY (series_id) REFERENCES series(id) ON DELETE CASCADE
       );
     ''');
@@ -254,6 +266,15 @@ class DatabaseService {
     db.execute(
       'CREATE INDEX IF NOT EXISTS idx_movies_thumb_queue ON movies(thumb_status, thumb_retry_at);',
     );
+    db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_series_source_id ON series(source_id);',
+    );
+    db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_episodes_source_id ON episodes(source_id);',
+    );
+    db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_movies_source_id ON movies(source_id);',
+    );
   }
 
   Map<String, String> loadSourceIdsByRoot() {
@@ -278,13 +299,21 @@ class DatabaseService {
     }
     final db = instance;
     final normTarget = SyncKeyUtils.normalizeRootPath(trimmed);
-    final rows = db.select('SELECT source_id, root_path FROM media_sources;');
+    final rows =
+        db.select('SELECT source_id, root_path, status FROM media_sources;');
     final usedIds = <String>{};
     for (final row in rows) {
       final id = row['source_id'] as String;
       final existingRoot = row['root_path'] as String;
+      final existingStatus = (row['status'] as String?) ?? 'active';
       usedIds.add(id);
       if (SyncKeyUtils.normalizeRootPath(existingRoot) == normTarget) {
+        if (existingStatus != 'active') {
+          db.execute(
+            "UPDATE media_sources SET status = 'active' WHERE source_id = ?;",
+            [id],
+          );
+        }
         return id;
       }
     }

@@ -3,6 +3,7 @@ import '../../core/services/desktop_platform_service.dart';
 import '../../core/storage/database_service.dart';
 import 'playback_session.dart';
 import 'player_models.dart';
+import 'track_preference_models.dart';
 
 class PlaybackPersistenceService {
   PlaybackPersistenceService(this._databaseService);
@@ -43,55 +44,74 @@ class PlaybackPersistenceService {
     return (rows.first['position_ms'] as int?) ?? 0;
   }
 
-  ({String? audioTrack, String? subtitleTrack, int introSkipSeconds})?
-      loadSeriesPreferences(int seriesId) {
+  SeriesTrackPreferences? loadSeriesTrackPreferences(int seriesId) {
     final db = _databaseService.instance;
     final rows = db.select(
-      'SELECT audio_track, subtitle_track, intro_skip_seconds FROM series_preferences WHERE series_id = ? LIMIT 1;',
+      '''
+      SELECT audio_track, subtitle_track, audio_pref_json, subtitle_pref_json, intro_skip_seconds
+      FROM series_preferences
+      WHERE series_id = ?
+      LIMIT 1;
+      ''',
       [seriesId],
     );
     if (rows.isEmpty) {
       return null;
     }
-    return (
-      audioTrack: rows.first['audio_track'] as String?,
-      subtitleTrack: rows.first['subtitle_track'] as String?,
-      introSkipSeconds: (rows.first['intro_skip_seconds'] as int?) ?? 0,
+    final row = rows.first;
+    final audioPref = TrackPreferenceDescriptor.tryFromJsonString(
+          row['audio_pref_json'] as String?,
+        ) ??
+        TrackPreferenceDescriptor.tryFromLegacyTrackId(
+          row['audio_track'] as String?,
+        );
+    final subtitlePref = TrackPreferenceDescriptor.tryFromJsonString(
+          row['subtitle_pref_json'] as String?,
+        ) ??
+        TrackPreferenceDescriptor.tryFromLegacyTrackId(
+          row['subtitle_track'] as String?,
+        );
+    return SeriesTrackPreferences(
+      audio: audioPref,
+      subtitle: subtitlePref,
+      introSkipSeconds: (row['intro_skip_seconds'] as int?) ?? 0,
     );
   }
 
-  void saveSeriesPreferences(
-    int seriesId,
-    String audioTrackId,
-    String subtitleTrackId, {
+  void saveSeriesTrackPreferences(
+    int seriesId, {
+    TrackPreferenceDescriptor? audio,
+    TrackPreferenceDescriptor? subtitle,
     int? introSkipSeconds,
   }) {
     final db = _databaseService.instance;
-    if (introSkipSeconds == null) {
+    if (audio != null) {
       db.execute(
         '''
-        INSERT INTO series_preferences (series_id, audio_track, subtitle_track)
+        INSERT INTO series_preferences (series_id, audio_track, audio_pref_json)
         VALUES (?, ?, ?)
         ON CONFLICT(series_id) DO UPDATE SET
           audio_track = excluded.audio_track,
-          subtitle_track = excluded.subtitle_track;
+          audio_pref_json = excluded.audio_pref_json;
         ''',
-        [seriesId, audioTrackId, subtitleTrackId],
+        [seriesId, audio.legacyTrackId, audio.toJsonString()],
       );
-      return;
     }
-
-    db.execute(
-      '''
-      INSERT INTO series_preferences (series_id, audio_track, subtitle_track, intro_skip_seconds)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(series_id) DO UPDATE SET
-        audio_track = excluded.audio_track,
-        subtitle_track = excluded.subtitle_track,
-        intro_skip_seconds = excluded.intro_skip_seconds;
-      ''',
-      [seriesId, audioTrackId, subtitleTrackId, introSkipSeconds],
-    );
+    if (subtitle != null) {
+      db.execute(
+        '''
+        INSERT INTO series_preferences (series_id, subtitle_track, subtitle_pref_json)
+        VALUES (?, ?, ?)
+        ON CONFLICT(series_id) DO UPDATE SET
+          subtitle_track = excluded.subtitle_track,
+          subtitle_pref_json = excluded.subtitle_pref_json;
+        ''',
+        [seriesId, subtitle.legacyTrackId, subtitle.toJsonString()],
+      );
+    }
+    if (introSkipSeconds != null) {
+      saveSeriesIntroSkip(seriesId, introSkipSeconds);
+    }
   }
 
   void saveSeriesIntroSkip(int seriesId, int seconds) {

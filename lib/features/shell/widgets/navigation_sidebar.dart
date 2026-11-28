@@ -11,6 +11,8 @@ class NavigationSidebar extends StatelessWidget {
     required this.onSelectSection,
     this.isScanning = false,
     this.isNasOffline = false,
+    this.hasScanError = false,
+    this.hasScanWarning = false,
     this.statusMessage = '',
   });
 
@@ -18,6 +20,8 @@ class NavigationSidebar extends StatelessWidget {
   final ValueChanged<AppSection> onSelectSection;
   final bool isScanning;
   final bool isNasOffline;
+  final bool hasScanError;
+  final bool hasScanWarning;
   final String statusMessage;
 
   @override
@@ -52,7 +56,7 @@ class NavigationSidebar extends StatelessWidget {
             onTap: () => onSelectSection(AppSection.stats),
           ),
           const Spacer(),
-          if (isScanning || isNasOffline)
+          if (isScanning || isNasOffline || hasScanError || hasScanWarning)
             Padding(
               padding: const EdgeInsets.only(bottom: AppSpacing.xs),
               child: Tooltip(
@@ -60,7 +64,9 @@ class NavigationSidebar extends StatelessWidget {
                     ? statusMessage
                     : (isScanning
                         ? AppStrings.scanningStatus
-                        : AppStrings.nasOfflineStatus),
+                        : (hasScanError
+                            ? AppStrings.scanFailedStatus
+                            : AppStrings.nasOfflineStatus)),
                 child: Container(
                   padding: const EdgeInsets.all(AppSpacing.xs),
                   decoration: BoxDecoration(
@@ -69,16 +75,26 @@ class NavigationSidebar extends StatelessWidget {
                     border: Border.all(
                       color: isScanning
                           ? AppColors.sapphireBright
-                          : AppColors.warningAmber,
+                          : (hasScanError
+                              ? AppColors.errorRed
+                              : AppColors.warningAmber),
                       width: AppSpacing.borderWidthThin,
                     ),
                   ),
                   child: Icon(
-                    isScanning ? Icons.sync : Icons.cloud_off_outlined,
+                    isScanning
+                        ? Icons.sync
+                        : (hasScanError
+                            ? Icons.error_outline
+                            : (isNasOffline
+                                ? Icons.cloud_off_outlined
+                                : Icons.warning_amber_rounded)),
                     size: AppSpacing.iconSizeSm,
                     color: isScanning
                         ? AppColors.sapphireBright
-                        : AppColors.warningAmber,
+                        : (hasScanError
+                            ? AppColors.errorRed
+                            : AppColors.warningAmber),
                   ),
                 ),
               ),

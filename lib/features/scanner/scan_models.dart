@@ -1,5 +1,16 @@
 import 'media_parser.dart';
 
+enum ScanPhase {
+  idle,
+  enumerating,
+  readingMetadata,
+  applyingDiff,
+  generatingThumbnails,
+  completed,
+  paused,
+  failed,
+}
+
 enum SourceScanStatus {
   complete,
   partial,
@@ -49,6 +60,10 @@ class SourceScanReport {
     this.errors = const [],
     this.filesExamined = 0,
     this.mediaFound = 0,
+    this.sourceId,
+    this.label,
+    this.startedAtMs,
+    this.finishedAtMs,
   });
 
   final String rootPath;
@@ -56,7 +71,14 @@ class SourceScanReport {
   final List<ScanDirectoryError> errors;
   final int filesExamined;
   final int mediaFound;
+  final String? sourceId;
+  final String? label;
+  final int? startedAtMs;
+  final int? finishedAtMs;
 
+  int get errorCount => errors.length;
+  String? get lastErrorMessage =>
+      errors.isNotEmpty ? errors.last.message : null;
   bool get isComplete => status == SourceScanStatus.complete;
   bool get isReachable =>
       status == SourceScanStatus.complete || status == SourceScanStatus.partial;
@@ -136,6 +158,7 @@ class ScannedSeriesData {
     required this.posterPath,
     required this.summary,
     required this.episodes,
+    this.sourceId,
   });
 
   final String title;
@@ -143,6 +166,7 @@ class ScannedSeriesData {
   final String? posterPath;
   final String? summary;
   final List<ParsedEpisode> episodes;
+  final String? sourceId;
 }
 
 class ScannedMovieData {
@@ -156,6 +180,7 @@ class ScannedMovieData {
     this.durationMs = 0,
     this.fileSize = 0,
     this.modifiedAt = 0,
+    this.sourceId,
   });
 
   final String title;
@@ -167,6 +192,7 @@ class ScannedMovieData {
   final int durationMs;
   final int fileSize;
   final int modifiedAt;
+  final String? sourceId;
 }
 
 class ScanOutput {
@@ -177,6 +203,7 @@ class ScanOutput {
     required this.movies,
     this.completeRoots,
     this.sourceReports = const [],
+    this.sourceIdsByRoot = const {},
     this.wasCancelled = false,
   });
 
@@ -186,6 +213,7 @@ class ScanOutput {
   final List<ScannedSeriesData> seriesList;
   final List<ScannedMovieData> movies;
   final List<SourceScanReport> sourceReports;
+  final Map<String, String> sourceIdsByRoot;
   final bool wasCancelled;
 
   List<String> get effectiveCompleteRoots => completeRoots ?? reachableRoots;
