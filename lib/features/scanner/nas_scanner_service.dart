@@ -45,15 +45,42 @@ class NasScannerService {
   final NasScanRepository _repository;
   final Future<EmbeddedMediaTags?> Function(String filePath)? _tagReader;
   bool _isPlaybackActive = false;
+  bool _isShutdownCancelled = false;
+  Future<ScanResult>? _activeScanFuture;
 
   bool get isPlaybackActive => _isPlaybackActive;
+  bool get _shouldAbort => _isPlaybackActive || _isShutdownCancelled;
 
   void setPlaybackActive(bool active) {
     _isPlaybackActive = active;
   }
 
-  Future<ScanResult> scanLibrary(List<String> rootPaths) async {
-    if (_isPlaybackActive) {
+  Future<void> cancelForShutdown() async {
+    _isShutdownCancelled = true;
+    ThumbnailGeneratorService.killActiveProcesses();
+    final active = _activeScanFuture;
+    if (active != null) {
+      await active.catchError(
+        (_) => const ScanResult(
+          nasReachable: false,
+          seriesCount: 0,
+          movieCount: 0,
+          skippedDueToPlayback: true,
+        ),
+      );
+    }
+  }
+
+  Future<ScanResult> scanLibrary(List<String> rootPaths) {
+    final future = _scanLibraryInternal(rootPaths);
+    _activeScanFuture = future;
+    return future.whenComplete(() {
+      if (identical(_activeScanFuture, future)) _activeScanFuture = null;
+    });
+  }
+
+  Future<ScanResult> _scanLibraryInternal(List<String> rootPaths) async {
+    if (_shouldAbort) {
       final counts = _repository.currentCounts();
       return ScanResult(
         nasReachable: true,
@@ -91,7 +118,7 @@ class NasScannerService {
         ? await Isolate.run(() => _runScanInIsolate(payload))
         : await _runScan(payload, tagReader: _tagReader);
 
-    if (_isPlaybackActive) {
+    if (_shouldAbort) {
       final counts = _repository.currentCounts();
       return ScanResult(
         nasReachable: output.nasReachable,
@@ -120,7 +147,7 @@ class NasScannerService {
       nasReachable: true,
       seriesCount: counts.$1,
       movieCount: counts.$2,
-      skippedDueToPlayback: _isPlaybackActive,
+      skippedDueToPlayback: _shouldAbort,
     );
   }
 
@@ -142,7 +169,7 @@ class NasScannerService {
   }
 
   Future<void> _generateMissingThumbnails() async {
-    if (_isPlaybackActive) {
+    if (_shouldAbort) {
       return;
     }
 
@@ -185,87 +212,65 @@ class NasScannerService {
       final result = await ThumbnailGeneratorService.generateThumbnail(
         videoFilePath: filePath,
         durationMs: durationMs,
-        isPlaybackActive: () => _isPlaybackActive,
+        isPlaybackActive: () => _shouldAbort,
         prefix: prefix,
         mediaKitSession: mediaKitSession,
         allowMediaKitFallback: mediaKitSession != null,
       );
-      if (result != null || _isPlaybackActive || mediaKitAttempted) {
+      if (result != null || _shouldAbort || mediaKitAttempted) {
         return result;
       }
       mediaKitAttempted = true;
       mediaKitSession = await ThumbnailMediaKitSession.create();
-      if (mediaKitSession == null || _isPlaybackActive) {
+      if (mediaKitSession == null || _shouldAbort) {
         return null;
       }
       return ThumbnailGeneratorService.generateThumbnail(
         videoFilePath: filePath,
         durationMs: durationMs,
-        isPlaybackActive: () => _isPlaybackActive,
+        isPlaybackActive: () => _shouldAbort,
         prefix: prefix,
         mediaKitSession: mediaKitSession,
         allowMediaKitFallback: true,
       );
     }
 
+    Future<void> processRows(
+      List<Map<String, Object?>> rows,
+      String table,
+      String prefix,
+    ) async {
+      for (final row in rows) {
+        if (_shouldAbort) break;
+        final id = row['id'] as int;
+        final filePath = row['file_path'] as String;
+        final durationMs = row['duration_ms'] as int;
+        final result = await generateWithLazyFallback(
+          filePath: filePath,
+          durationMs: durationMs,
+          prefix: prefix,
+        );
+        if (_shouldAbort) break;
+        if (result?.fileName != null) {
+          final nextDur = (durationMs == 0 && (result!.durationMs ?? 0) > 0)
+              ? result.durationMs!
+              : durationMs;
+          db.execute(
+            "UPDATE $table SET thumb_path = ?, thumb_status = 'ready', duration_ms = ? WHERE id = ?;",
+            [result!.fileName, nextDur, id],
+          );
+        } else {
+          db.execute(
+            "UPDATE $table SET thumb_status = 'failed' WHERE id = ?;",
+            [id],
+          );
+        }
+      }
+    }
+
     try {
-      for (final row in episodeRows) {
-        if (_isPlaybackActive) break;
-        final id = row['id'] as int;
-        final filePath = row['file_path'] as String;
-        final durationMs = row['duration_ms'] as int;
-
-        final result = await generateWithLazyFallback(
-          filePath: filePath,
-          durationMs: durationMs,
-          prefix: 'ep',
-        );
-        if (_isPlaybackActive) break;
-
-        if (result?.fileName != null) {
-          final nextDur = (durationMs == 0 && (result!.durationMs ?? 0) > 0)
-              ? result.durationMs!
-              : durationMs;
-          db.execute(
-            "UPDATE episodes SET thumb_path = ?, thumb_status = 'ready', duration_ms = ? WHERE id = ?;",
-            [result!.fileName, nextDur, id],
-          );
-        } else {
-          db.execute(
-            "UPDATE episodes SET thumb_status = 'failed' WHERE id = ?;",
-            [id],
-          );
-        }
-      }
-
-      for (final row in movieRows) {
-        if (_isPlaybackActive) break;
-        final id = row['id'] as int;
-        final filePath = row['file_path'] as String;
-        final durationMs = row['duration_ms'] as int;
-
-        final result = await generateWithLazyFallback(
-          filePath: filePath,
-          durationMs: durationMs,
-          prefix: 'mv',
-        );
-        if (_isPlaybackActive) break;
-
-        if (result?.fileName != null) {
-          final nextDur = (durationMs == 0 && (result!.durationMs ?? 0) > 0)
-              ? result.durationMs!
-              : durationMs;
-          db.execute(
-            "UPDATE movies SET thumb_path = ?, thumb_status = 'ready', duration_ms = ? WHERE id = ?;",
-            [result!.fileName, nextDur, id],
-          );
-        } else {
-          db.execute(
-            "UPDATE movies SET thumb_status = 'failed' WHERE id = ?;",
-            [id],
-          );
-        }
-      }
+      await processRows(episodeRows, 'episodes', 'ep');
+      await processRows(movieRows, 'movies', 'mv');
     } finally {
       await mediaKitSession?.dispose();
     }

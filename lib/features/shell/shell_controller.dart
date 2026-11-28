@@ -27,12 +27,20 @@ class ShellController extends ChangeNotifier {
     StatsController? statsController,
     SaphirPlayerController? playerController,
     DatabaseService? databaseService,
+    Future<void> Function()? onHideWindow,
+    Future<void> Function()? onDestroyWindow,
+    VoidCallback? onForceExit,
   })  : _settingsController = settingsController,
         _libraryController = libraryController,
         _homeController = homeController,
         _statsController = statsController,
         _playerController = playerController,
-        _databaseService = databaseService;
+        _databaseService = databaseService,
+        _onHideWindow = onHideWindow ?? DesktopPlatformService.hideWindow,
+        _onDestroyWindow =
+            onDestroyWindow ?? DesktopPlatformService.destroyWindow,
+        _onForceExit =
+            onForceExit ?? DesktopPlatformService.forceExitProcess;
 
   SettingsController? _settingsController;
   LibraryController? _libraryController;
@@ -40,6 +48,9 @@ class ShellController extends ChangeNotifier {
   StatsController? _statsController;
   SaphirPlayerController? _playerController;
   DatabaseService? _databaseService;
+  final Future<void> Function() _onHideWindow;
+  final Future<void> Function() _onDestroyWindow;
+  final VoidCallback _onForceExit;
 
   AppSection _activeSection = AppSection.home;
   bool _isMaximized = false;
@@ -57,6 +68,7 @@ class ShellController extends ChangeNotifier {
   SeriesDetailData? get selectedSeriesDetail => _selectedSeriesDetail;
   PlaybackSession? get activePlaybackSession => _activePlaybackSession;
   bool get isPlayerOpen => _activePlaybackSession != null;
+  bool get isClosing => _isClosing;
   String? get statusMessage => _statusMessage;
 
   void attachDependencies({
@@ -107,14 +119,85 @@ class ShellController extends ChangeNotifier {
   Future<void> onWindowClose() async {
     if (_isClosing) return;
     _isClosing = true;
+    cancelPendingTimers();
+
+    try {
+      await _onHideWindow();
+    } catch (_) {}
+
+    var playerDisposeTimedOut = false;
+    var scanStopTimedOut = false;
+    var shouldDrainNativeVideo = false;
+
     try {
       if (isPlayerOpen) {
-        await _playerController?.stopAndClose();
+        _libraryController?.setPlaybackActive(false);
+        closePlaybackSession();
       }
-      await _settingsController?.syncProgress();
-      _databaseService?.close();
+
+      final shutdownTasks = <Future<void>>[];
+      if (_playerController != null) {
+        shutdownTasks.add(
+          _runWithTimeout(
+            _playerController!.disposeForShutdown(),
+            const Duration(
+              milliseconds: AppSpacing.shutdownPlayerDisposeTimeoutMs,
+            ),
+          ).then((disposed) {
+            shouldDrainNativeVideo = disposed;
+            playerDisposeTimedOut = !disposed;
+          }),
+        );
+      }
+
+      if (_libraryController != null) {
+        shutdownTasks.add(
+          _runWithTimeout(
+            _libraryController!.cancelScanForShutdown(),
+            const Duration(
+              milliseconds: AppSpacing.shutdownScanStopTimeoutMs,
+            ),
+          ).then((stopped) {
+            scanStopTimedOut = !stopped;
+          }),
+        );
+      }
+
+      if (shutdownTasks.isNotEmpty) {
+        await Future.wait(shutdownTasks);
+      }
+
+      if (shouldDrainNativeVideo) {
+        await Future<void>.delayed(
+          const Duration(milliseconds: AppSpacing.shutdownNativeDrainDelayMs),
+        );
+      }
+
+      if (_settingsController != null) {
+        await _runWithTimeout(
+          _settingsController!.syncProgress(),
+          const Duration(milliseconds: AppSpacing.shutdownSyncTimeoutMs),
+        );
+      }
+
+      if (!scanStopTimedOut) {
+        _databaseService?.close();
+      }
     } finally {
-      await DesktopPlatformService.destroyWindow();
+      if (playerDisposeTimedOut || scanStopTimedOut) {
+        _onForceExit();
+      } else {
+        await _onDestroyWindow();
+      }
+    }
+  }
+
+  Future<bool> _runWithTimeout(Future<void> future, Duration timeout) async {
+    try {
+      await future.timeout(timeout);
+      return true;
+    } catch (_) {
+      return false;
     }
   }
 

@@ -217,13 +217,26 @@ void main() {
         find.byTooltip(AppStrings.removeFromContinueWatchingTooltip),
       );
       await tester.pump();
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 30)),
-      );
+      final syncFile = File(p.join(nasRoot.path, 'progress_sync.json'));
+      await tester.runAsync(() async {
+        final deadline = DateTime.now().add(const Duration(seconds: 2));
+        while (DateTime.now().isBefore(deadline)) {
+          if (syncFile.existsSync()) {
+            try {
+              final decoded =
+                  jsonDecode(syncFile.readAsStringSync()) as Map<String, dynamic>;
+              final entries = decoded['entries'] as Map<String, dynamic>? ?? {};
+              if (entries.values.any((v) => (v as Map)['position_ms'] == 0)) {
+                break;
+              }
+            } catch (_) {}
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 25));
+        }
+      });
       await tester.pumpAndSettle();
 
       expect(homeController.continueWatching, isEmpty);
-      final syncFile = File(p.join(nasRoot.path, 'progress_sync.json'));
       expect(syncFile.existsSync(), isTrue);
       final decoded =
           jsonDecode(syncFile.readAsStringSync()) as Map<String, dynamic>;

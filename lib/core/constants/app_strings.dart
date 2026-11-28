@@ -2,6 +2,9 @@ class AppStrings {
   AppStrings._();
 
   static const String appTitle = 'SaphirPlayer';
+  static const String startupErrorTitle = 'Startfehler';
+  static const String startupErrorMessage =
+      'Die lokale Datenbank konnte nicht geöffnet werden. Bitte prüfe, ob eine andere Instanz läuft oder der Speicherort beschreibbar ist.';
   static const String homeTab = 'Start';
   static const String libraryTab = 'Bibliothek';
   static const String statsTab = 'Statistiken';

@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:ui';
 import 'package:file_picker/file_picker.dart';
 import 'package:window_manager/window_manager.dart';
+import '../constants/app_spacing.dart';
 
 class DesktopPlatformService {
   DesktopPlatformService._();
@@ -64,7 +65,26 @@ class DesktopPlatformService {
 
   static Future<void> destroyWindow() async {
     if (_isDesktop) {
-      await windowManager.destroy();
+      try {
+        await windowManager.destroy().timeout(
+              const Duration(
+                milliseconds: AppSpacing.shutdownWindowDestroyTimeoutMs,
+              ),
+            );
+      } catch (_) {}
+      exit(0);
+    }
+  }
+
+  static Future<void> hideWindow() async {
+    if (_isDesktop) {
+      await windowManager.hide();
+    }
+  }
+
+  static void forceExitProcess([int exitCode = 0]) {
+    if (_isDesktop) {
+      exit(exitCode);
     }
   }
 

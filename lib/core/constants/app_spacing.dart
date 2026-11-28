@@ -91,13 +91,16 @@ class AppSpacing {
 
   static const int staleDaysDefault = 60;
   static const double thumbnailSeekRatio = 0.15;
+  static const int thumbnailMinSeekSeconds = 300;
   static const int ffmpegTimeoutSeconds = 10;
   static const int ffprobeTimeoutSeconds = 5;
   static const int mkvTagHeaderMaxScanBytes = 262144;
   static const int executableProbeTimeoutSeconds = 2;
   static const int thumbnailShortVideoSeekSeconds = 1;
   static const int thumbnailShortVideoThresholdSeconds = 30;
-  static const int thumbnailSeekWaitTimeoutMs = 2500;
+  static const int thumbnailOpenTimeoutSeconds = 8;
+  static const int thumbnailSeekWaitTimeoutMs = 6000;
+  static const int thumbnailFrameSettleMs = 450;
   static const int millisecondsPerSecond = 1000;
   static const int secondsPerMinute = 60;
   static const int secondsPerHour = 3600;
@@ -191,4 +194,10 @@ class AppSpacing {
   static const double sleepBadgeFontSize = 11.0;
   static const double shortcutKeyFontSize = 12.0;
   static const double diagnosticsFontSize = 12.0;
+
+  static const int shutdownPlayerDisposeTimeoutMs = 2000;
+  static const int shutdownScanStopTimeoutMs = 1500;
+  static const int shutdownSyncTimeoutMs = 2500;
+  static const int shutdownNativeDrainDelayMs = 250;
+  static const int shutdownWindowDestroyTimeoutMs = 1000;
 }

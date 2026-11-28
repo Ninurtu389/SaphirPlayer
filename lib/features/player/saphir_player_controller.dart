@@ -69,6 +69,7 @@ class SaphirPlayerController extends ChangeNotifier {
   Timer? _hudHideTimer;
   Timer? _progressTimer;
   bool _isDisposed = false;
+  bool _playerDisposed = false;
   bool _isMenuOrDialogOpen = false;
   int _openRequestId = 0;
   int? _pendingStartPositionMs;
@@ -345,17 +346,13 @@ class SaphirPlayerController extends ChangeNotifier {
     _overlays.showActionOsd(PlayerActionOsdKind.speed, Formatters.formatPlaybackSpeed(speed));
     _safeNotify();
   }
-  Future<void> playNextEpisode({bool skipPersist = false}) async {
-    if (!hasNextEpisode) return;
+  Future<void> playNextEpisode({bool skipPersist = false}) => _switchEpisode(_currentIndex + 1, hasNextEpisode, skipPersist: skipPersist);
+  Future<void> playPreviousEpisode() => _switchEpisode(_currentIndex - 1, hasPreviousEpisode);
+  Future<void> _switchEpisode(int index, bool allowed, {bool skipPersist = false}) async {
+    if (!allowed) return;
     _stopProgressTimer();
     if (!skipPersist) _persistProgress(syncRemote: true);
-    await _openEntryAtIndex(_currentIndex + 1);
-  }
-  Future<void> playPreviousEpisode() async {
-    if (!hasPreviousEpisode) return;
-    _stopProgressTimer();
-    _persistProgress(syncRemote: true);
-    await _openEntryAtIndex(_currentIndex - 1);
+    await _openEntryAtIndex(index);
   }
   Future<void> playEntryAtIndex(int index) async {
     if (_session == null || index < 0 || index >= _session!.queue.length) return;
@@ -449,25 +446,16 @@ class SaphirPlayerController extends ChangeNotifier {
     });
   }
   Future<void> stopAndClose() async {
-    _openRequestId++;
-    _isMenuOrDialogOpen = false;
-    _hudHideTimer?.cancel();
-    _stopProgressTimer();
-    _overlays.resetForClose();
+    _openRequestId++; _isMenuOrDialogOpen = false;
+    _hudHideTimer?.cancel(); _stopProgressTimer(); _overlays.resetForClose();
     _persistence.recordWatchHistorySlice(currentEntry, isPlaying: false);
     _persistProgress(syncRemote: true);
-    _playbackSpeed = 1.0;
-    await _player.setRate(1.0);
-    await _features.resetForClose();
-    await _player.stop();
-    await _features.exitMiniPlayer();
+    _playbackSpeed = 1.0; await _player.setRate(1.0);
+    await _features.resetForClose(); await _player.stop(); await _features.exitMiniPlayer();
     if (_isFullscreen) { _isFullscreen = false; await _windowAdapter.setFullScreen(false); }
     _persistence.resetHistoryTracking();
-    _position = Duration.zero;
-    _duration = Duration.zero;
-    _updateProgressNotifier(force: true);
-    _session = null;
-    _safeNotify();
+    _position = Duration.zero; _duration = Duration.zero;
+    _updateProgressNotifier(force: true); _session = null; _safeNotify();
   }
   void _persistProgress({bool forceCompleted = false, bool syncRemote = false}) {
     final entry = currentEntry;
@@ -477,17 +465,27 @@ class SaphirPlayerController extends ChangeNotifier {
     if (syncRemote) unawaited(_syncService.syncWithRoots(_getNasPaths()));
   }
   void _safeNotify() { if (!_isDisposed) notifyListeners(); }
-  @override
-  void dispose() {
-    _isDisposed = true;
-    _openRequestId++;
-    _hudHideTimer?.cancel();
-    _stopProgressTimer();
-    _overlays.dispose();
-    progressListenable.dispose();
+  void _teardownResources() {
+    _isDisposed = true; _openRequestId++; _isMenuOrDialogOpen = false;
+    _hudHideTimer?.cancel(); _stopProgressTimer();
+    _overlays.dispose(); progressListenable.dispose();
     for (final sub in _subscriptions) { sub.cancel(); }
     _subscriptions.clear();
-    _player.dispose();
+  }
+  Future<void> disposeForShutdown() async {
+    if (_playerDisposed) return;
+    _persistence.recordWatchHistorySlice(currentEntry, isPlaying: false);
+    _persistProgress(syncRemote: false);
+    _persistence.resetHistoryTracking();
+    _session = null;
+    _teardownResources();
+    _playerDisposed = true;
+    await _player.dispose();
+  }
+  @override
+  void dispose() {
+    if (!_isDisposed) _teardownResources();
+    if (!_playerDisposed) { _playerDisposed = true; unawaited(_player.dispose()); }
     super.dispose();
   }
 }

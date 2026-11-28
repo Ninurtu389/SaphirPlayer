@@ -1,15 +1,20 @@
+import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mocktail/mocktail.dart';
 import 'package:saphir_player/core/constants/app_spacing.dart';
 import 'package:saphir_player/core/controllers/library_controller.dart';
 import 'package:saphir_player/core/controllers/settings_controller.dart';
+import 'package:saphir_player/core/storage/progress_sync_service.dart';
 import 'package:saphir_player/core/theme/effect_mode.dart';
 import 'package:saphir_player/features/home/home_controller.dart';
 import 'package:saphir_player/features/library/library_models.dart';
 import 'package:saphir_player/features/library/media_repository.dart';
 import 'package:saphir_player/features/player/playback_session.dart';
+import 'package:saphir_player/features/player/saphir_player_controller.dart';
 import 'package:saphir_player/features/shell/shell_controller.dart';
 import 'package:saphir_player/features/stats/stats_controller.dart';
 import 'package:saphir_player/features/stats/stats_models.dart';
+import '../helpers/mock_player.dart';
 import '../helpers/test_fixtures.dart';
 
 void main() {
@@ -445,6 +450,93 @@ void main() {
       );
       expect(completedEp.progressRatio, 1.0);
       expect(completedEp.formattedDuration, '45 Min.');
+    });
+
+    test(
+        'ShellController.onWindowClose disposes player once, closes DB, hides and destroys window',
+        () async {
+      final harness = FakePlayerHarness();
+      addTearDown(harness.close);
+      final syncService = ProgressSyncService(env.dbService);
+      final playerController = SaphirPlayerController(
+        env.dbService,
+        syncService,
+        () => settingsController.nasPaths,
+        settingsController: settingsController,
+        player: harness.player,
+        videoController: harness.videoController,
+        onSetFullScreen: harness.onSetFullScreen,
+      );
+
+      final events = <String>[];
+      final shell = ShellController(
+        settingsController: settingsController,
+        libraryController: libraryController,
+        homeController: homeController,
+        statsController: statsController,
+        playerController: playerController,
+        databaseService: env.dbService,
+        onHideWindow: () async => events.add('hide'),
+        onDestroyWindow: () async => events.add('destroy'),
+        onForceExit: () => events.add('forceExit'),
+      );
+
+      shell.openPlaybackSession(const PlaybackSession(queue: [], initialIndex: 0));
+      expect(shell.isPlayerOpen, isTrue);
+
+      await Future.wait([
+        shell.onWindowClose(),
+        shell.onWindowClose(),
+      ]);
+
+      expect(shell.isClosing, isTrue);
+      expect(shell.isPlayerOpen, isFalse);
+      expect(harness.disposed, isTrue);
+      expect(env.dbService.isOpen, isFalse);
+      expect(events, ['hide', 'destroy']);
+
+      // Calling dispose() after disposeForShutdown() must not invoke player.dispose() twice.
+      playerController.dispose();
+      verify(() => harness.player.dispose()).called(1);
+      shell.dispose();
+    });
+
+    test(
+        'ShellController.onWindowClose triggers forceExit when player dispose hangs past timeout',
+        () async {
+      final harness = FakePlayerHarness();
+      addTearDown(harness.close);
+      final stuckDispose = Completer<void>();
+      when(() => harness.player.dispose()).thenAnswer((_) => stuckDispose.future);
+
+      final playerController = SaphirPlayerController(
+        env.dbService,
+        ProgressSyncService(env.dbService),
+        () => settingsController.nasPaths,
+        settingsController: settingsController,
+        player: harness.player,
+        videoController: harness.videoController,
+        onSetFullScreen: harness.onSetFullScreen,
+      );
+
+      final events = <String>[];
+      final shell = ShellController(
+        settingsController: settingsController,
+        libraryController: libraryController,
+        homeController: homeController,
+        statsController: statsController,
+        playerController: playerController,
+        databaseService: env.dbService,
+        onHideWindow: () async => events.add('hide'),
+        onDestroyWindow: () async => events.add('destroy'),
+        onForceExit: () => events.add('forceExit'),
+      );
+
+      await shell.onWindowClose();
+
+      expect(events, ['hide', 'forceExit']);
+      expect(env.dbService.isOpen, isFalse);
+      shell.dispose();
     });
   });
 }

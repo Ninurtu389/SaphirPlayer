@@ -129,6 +129,8 @@ class LibraryController extends ChangeNotifier {
     }
   }
 
+  Future<void> cancelScanForShutdown() => _scannerService.cancelForShutdown();
+
   void _safeNotify() {
     if (!_isDisposed) {
       notifyListeners();

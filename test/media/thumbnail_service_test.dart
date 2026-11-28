@@ -123,5 +123,21 @@ void main() {
 
       settings.dispose();
     });
+
+    test('computeSeekSeconds starts at 5th minute (300s) for >=5min or unknown duration and clamps short videos',
+        () {
+      expect(ThumbnailGeneratorService.computeSeekSeconds(0), 300);
+      expect(ThumbnailGeneratorService.computeSeekSeconds(-1), 300);
+      // 20-min episode (1200s): 15% = 180s -> clamped up to 300s (5th minute)
+      expect(ThumbnailGeneratorService.computeSeekSeconds(20 * 60 * 1000), 300);
+      // 90-min movie (5400s): 15% = 810s (>= 300s)
+      expect(ThumbnailGeneratorService.computeSeekSeconds(90 * 60 * 1000), 810);
+      // 5m05s video (305s): 300s
+      expect(ThumbnailGeneratorService.computeSeekSeconds(305 * 1000), 300);
+      // 3-min video (180s): shorter than 5 min -> 15% = 27s
+      expect(ThumbnailGeneratorService.computeSeekSeconds(180 * 1000), 27);
+      // 10-sec clip: 15% = 2s
+      expect(ThumbnailGeneratorService.computeSeekSeconds(10 * 1000), 2);
+    });
   });
 }

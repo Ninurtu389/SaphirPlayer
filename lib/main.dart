@@ -20,7 +20,6 @@ import 'features/stats/stats_controller.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
-  await PortablePaths.warmUp();
   await windowManager.ensureInitialized();
 
   const windowOptions = WindowOptions(
@@ -31,18 +30,31 @@ Future<void> main() async {
     title: AppStrings.appTitle,
   );
 
-  await windowManager.waitUntilReadyToShow(windowOptions, () async {
-    await windowManager.show();
-    await windowManager.focus();
-  });
-
   final databaseService = DatabaseService();
-  await databaseService.open();
+  Object? startupError;
+
+  try {
+    await PortablePaths.warmUp();
+    await databaseService.open();
+  } catch (error) {
+    startupError = error;
+  }
+
+  if (startupError != null) {
+    runApp(_StartupErrorApp(errorDetail: startupError.toString()));
+    await windowManager.waitUntilReadyToShow(windowOptions, () async {
+      await windowManager.show();
+      await windowManager.focus();
+    });
+    return;
+  }
 
   final syncService = ProgressSyncService(databaseService);
   final settingsController =
       SettingsController(databaseService, syncService: syncService);
-  await settingsController.load();
+  try {
+    await settingsController.load();
+  } catch (_) {}
 
   final libraryController =
       LibraryController(databaseService, settingsController);
@@ -69,9 +81,7 @@ Future<void> main() async {
     playerController: playerController,
     databaseService: databaseService,
   );
-  await DesktopPlatformService.setPreventClose(true);
   shellController.attachWindowListener();
-  await shellController.syncMaximizedState();
 
   runApp(
     SaphirPlayerApp(
@@ -84,14 +94,66 @@ Future<void> main() async {
     ),
   );
 
+  await windowManager.waitUntilReadyToShow(windowOptions, () async {
+    try {
+      await DesktopPlatformService.setPreventClose(true);
+      await shellController.syncMaximizedState();
+    } catch (_) {}
+    await windowManager.show();
+    await windowManager.focus();
+  });
+
   unawaited(
     settingsController.syncProgress().then((_) {
-      if (!databaseService.isOpen) return;
+      if (!databaseService.isOpen || shellController.isClosing) return;
       libraryController.loadCountsFromCache();
       homeController.refreshHomeFeeds();
       statsController.refreshStats();
     }),
   );
+}
+
+class _StartupErrorApp extends StatelessWidget {
+  const _StartupErrorApp({required this.errorDetail});
+
+  final String errorDetail;
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: AppStrings.appTitle,
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.buildDarkTheme(),
+      home: Scaffold(
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.xl),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  AppStrings.startupErrorTitle,
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  AppStrings.startupErrorMessage,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                const SizedBox(height: AppSpacing.md),
+                SelectableText(
+                  errorDetail,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class SaphirPlayerApp extends StatelessWidget {

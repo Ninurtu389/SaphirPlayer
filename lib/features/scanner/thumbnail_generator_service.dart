@@ -3,10 +3,12 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
 import 'package:path/path.dart' as p;
 import '../../core/constants/app_spacing.dart';
 import '../../core/storage/portable_paths.dart';
+import 'thumbnail_media_kit_session.dart';
+
+export 'thumbnail_media_kit_session.dart';
 
 class ThumbnailGenerationResult {
   const ThumbnailGenerationResult({
@@ -18,60 +20,6 @@ class ThumbnailGenerationResult {
   final int? durationMs;
 }
 
-class ThumbnailMediaKitSession {
-  ThumbnailMediaKitSession._({
-    required this.player,
-    required this.videoController,
-  });
-
-  final Player player;
-  final VideoController videoController;
-
-  static Future<ThumbnailMediaKitSession?> create() async {
-    Player? player;
-    try {
-      player = Player(
-        configuration: const PlayerConfiguration(
-          muted: true,
-          osc: false,
-        ),
-      );
-      final videoController = VideoController(
-        player,
-        configuration: VideoControllerConfiguration(
-          width: AppSpacing.thumbWidth.toInt(),
-          height: AppSpacing.thumbHeight.toInt(),
-          enableHardwareAcceleration: false,
-        ),
-      );
-      await videoController.platform.future.timeout(
-        const Duration(seconds: 3),
-      );
-
-      final platform = player.platform;
-      if (platform is NativePlayer) {
-        await platform.setProperty(
-          'vf',
-          'scale=${AppSpacing.thumbWidth.toInt()}:${AppSpacing.thumbHeight.toInt()}:force_original_aspect_ratio=decrease',
-        );
-      }
-
-      return ThumbnailMediaKitSession._(
-        player: player,
-        videoController: videoController,
-      );
-    } catch (e) {
-      debugPrint('ThumbnailMediaKitSession.create failed: $e');
-      await player?.dispose();
-      return null;
-    }
-  }
-
-  Future<void> dispose() async {
-    await player.dispose();
-  }
-}
-
 class ThumbnailGeneratorService {
   ThumbnailGeneratorService._();
 
@@ -79,6 +27,16 @@ class ThumbnailGeneratorService {
   static String? _cachedFfmpegExe;
   static bool _ffprobeResolved = false;
   static String? _cachedFfprobeExe;
+  static final Set<Process> _activeProcesses = <Process>{};
+
+  static void killActiveProcesses() {
+    for (final process in _activeProcesses.toList()) {
+      try {
+        process.kill();
+      } catch (_) {}
+    }
+    _activeProcesses.clear();
+  }
 
   @visibleForTesting
   static void resetExecutableCacheForTesting() {
@@ -150,17 +108,33 @@ class ThumbnailGeneratorService {
       return null;
     }
 
-    final seekSeconds = _computeSeekSeconds(durationMs);
+    final seekSeconds = computeSeekSeconds(durationMs);
 
-    final ffmpegOk = await _tryGenerateWithFfmpeg(
+    var ffmpegOk = await _tryGenerateWithFfmpeg(
       videoFilePath: videoFilePath,
       seekSeconds: seekSeconds,
       outputPath: outputPath,
       isPlaybackActive: isPlaybackActive,
     );
+    int? probedDurationMs;
+    if (!ffmpegOk && durationMs <= 0 && !isPlaybackActive()) {
+      probedDurationMs = await _probeDurationWithFfprobe(videoFilePath);
+      if (probedDurationMs != null &&
+          probedDurationMs > 0 &&
+          !isPlaybackActive()) {
+        final adjustedSeek = computeSeekSeconds(probedDurationMs);
+        if (adjustedSeek != seekSeconds) {
+          ffmpegOk = await _tryGenerateWithFfmpeg(
+            videoFilePath: videoFilePath,
+            seekSeconds: adjustedSeek,
+            outputPath: outputPath,
+            isPlaybackActive: isPlaybackActive,
+          );
+        }
+      }
+    }
     if (ffmpegOk) {
-      int? probedDurationMs;
-      if (durationMs <= 0 && !isPlaybackActive()) {
+      if (durationMs <= 0 && probedDurationMs == null && !isPlaybackActive()) {
         probedDurationMs = await _probeDurationWithFfprobe(videoFilePath);
       }
       return ThumbnailGenerationResult(
@@ -224,6 +198,7 @@ class ThumbnailGeneratorService {
         ],
         runInShell: false,
       );
+      _activeProcesses.add(process);
       unawaited(process.stdout.drain<void>());
       unawaited(process.stderr.drain<void>());
 
@@ -245,6 +220,8 @@ class ThumbnailGeneratorService {
       return false;
     } on ProcessException {
       return false;
+    } finally {
+      if (process != null) _activeProcesses.remove(process);
     }
   }
 
@@ -268,6 +245,7 @@ class ThumbnailGeneratorService {
         ],
         runInShell: false,
       );
+      _activeProcesses.add(process);
       final stdoutFuture = process.stdout.transform(utf8.decoder).join();
       unawaited(process.stderr.drain<void>());
       final exitCode = await process.exitCode.timeout(
@@ -287,6 +265,8 @@ class ThumbnailGeneratorService {
       return null;
     } on ProcessException {
       return null;
+    } finally {
+      if (process != null) _activeProcesses.remove(process);
     }
   }
 
@@ -316,7 +296,10 @@ class ThumbnailGeneratorService {
 
       final width = await player.stream.width
           .firstWhere((w) => w != null && w > 0)
-          .timeout(const Duration(seconds: 5), onTimeout: () => null);
+          .timeout(
+            const Duration(seconds: AppSpacing.thumbnailOpenTimeoutSeconds),
+            onTimeout: () => null,
+          );
       if (width == null || width <= 0 || isPlaybackActive()) {
         await player.stop();
         return (ok: false, durationMs: null);
@@ -335,12 +318,7 @@ class ThumbnailGeneratorService {
 
       final totalMs = durationMs > 0 ? durationMs : knownDuration.inMilliseconds;
       if (totalMs > 0) {
-        effectiveSeekSeconds = _computeSeekSeconds(totalMs);
-        final maxSeekSeconds =
-            (totalMs / AppSpacing.millisecondsPerSecond).floor() - 1;
-        if (maxSeekSeconds >= 1 && effectiveSeekSeconds > maxSeekSeconds) {
-          effectiveSeekSeconds = maxSeekSeconds;
-        }
+        effectiveSeekSeconds = computeSeekSeconds(totalMs);
       }
 
       if (isPlaybackActive()) {
@@ -349,14 +327,31 @@ class ThumbnailGeneratorService {
       }
 
       await player.seek(Duration(seconds: effectiveSeekSeconds));
+      var seekReached = false;
       await player.stream.position
-          .firstWhere(
-            (pos) => (pos.inSeconds - effectiveSeekSeconds).abs() <= 2,
-          )
+          .firstWhere((pos) {
+            if ((pos.inSeconds - effectiveSeekSeconds).abs() <= 5) {
+              seekReached = true;
+              return true;
+            }
+            return false;
+          })
           .timeout(
             const Duration(milliseconds: AppSpacing.thumbnailSeekWaitTimeoutMs),
             onTimeout: () => player.state.position,
           );
+      if (!seekReached &&
+          effectiveSeekSeconds > 10 &&
+          (player.state.position.inSeconds - effectiveSeekSeconds).abs() > 15) {
+        await player.stop();
+        return (ok: false, durationMs: null);
+      }
+
+      // Allow libmpv to decode and present a video frame at the seek target
+      // before pausing, otherwise screenshot() can capture a black frame.
+      await Future<void>.delayed(
+        const Duration(milliseconds: AppSpacing.thumbnailFrameSettleMs),
+      );
       await player.pause();
 
       if (isPlaybackActive()) {
@@ -364,7 +359,15 @@ class ThumbnailGeneratorService {
         return (ok: false, durationMs: null);
       }
 
-      final bytes = await player.screenshot(format: 'image/jpeg');
+      var bytes = await player.screenshot(format: 'image/jpeg');
+      if (bytes == null || bytes.isEmpty) {
+        await Future<void>.delayed(
+          const Duration(milliseconds: AppSpacing.thumbnailFrameSettleMs),
+        );
+        if (!isPlaybackActive()) {
+          bytes = await player.screenshot(format: 'image/jpeg');
+        }
+      }
       await player.stop();
 
       if (bytes != null && bytes.isNotEmpty) {
@@ -454,20 +457,38 @@ class ThumbnailGeneratorService {
     }
   }
 
-  static int _computeSeekSeconds(int durationMs) {
+  @visibleForTesting
+  static int computeSeekSeconds(int durationMs) {
     if (durationMs <= 0) {
-      return 30;
+      return AppSpacing.thumbnailMinSeekSeconds;
     }
-    final targetMs = (durationMs * AppSpacing.thumbnailSeekRatio).round();
-    final seconds = (targetMs / AppSpacing.millisecondsPerSecond).round();
-    final shortThresholdMs =
-        AppSpacing.thumbnailShortVideoThresholdSeconds *
-            AppSpacing.millisecondsPerSecond;
-    if (durationMs < shortThresholdMs) {
-      return seconds < AppSpacing.thumbnailShortVideoSeekSeconds
+    final totalSeconds =
+        (durationMs / AppSpacing.millisecondsPerSecond).floor();
+    if (totalSeconds <= 1) {
+      return 0;
+    }
+    final ratioSeconds =
+        ((durationMs * AppSpacing.thumbnailSeekRatio) /
+                AppSpacing.millisecondsPerSecond)
+            .round();
+
+    if (totalSeconds > AppSpacing.thumbnailMinSeekSeconds + 2) {
+      final target = ratioSeconds < AppSpacing.thumbnailMinSeekSeconds
+          ? AppSpacing.thumbnailMinSeekSeconds
+          : ratioSeconds;
+      final maxSeek = totalSeconds - 2;
+      return target > maxSeek ? maxSeek : target;
+    }
+
+    final maxSeek = totalSeconds - 1;
+    if (totalSeconds <= AppSpacing.thumbnailShortVideoThresholdSeconds) {
+      final target = ratioSeconds < AppSpacing.thumbnailShortVideoSeekSeconds
           ? AppSpacing.thumbnailShortVideoSeekSeconds
-          : seconds;
+          : ratioSeconds;
+      return target > maxSeek ? maxSeek : target;
     }
-    return seconds < 5 ? 5 : seconds;
+
+    final target = ratioSeconds < 5 ? 5 : ratioSeconds;
+    return target > maxSeek ? maxSeek : target;
   }
 }
